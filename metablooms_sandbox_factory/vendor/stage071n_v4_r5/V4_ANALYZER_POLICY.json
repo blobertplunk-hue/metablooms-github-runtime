@@ -1,0 +1,101 @@
+{
+  "schema": "mb.stage071n.v4.analyzer_policy.v1",
+  "required_tools": [
+    "ruff",
+    "mypy",
+    "bandit",
+    "semgrep",
+    "shellcheck",
+    "syft",
+    "trivy",
+    "grype"
+  ],
+  "active_extensions": [
+    ".py",
+    ".pyi",
+    ".sh",
+    ".bash",
+    ".yml",
+    ".yaml"
+  ],
+  "exclude_prefixes": [
+    ".git",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "__pycache__",
+    "02_PROJECT_OVERLAYS",
+    "2_evidence",
+    "exports",
+    "fixtures",
+    "handoff",
+    "research",
+    "receipts",
+    "metablooms_recovery",
+    "METABLOOMS_OVERLAY_BACKUPS",
+    "OAI_ARTIFACT_CARTRIDGES_MODULAR_PACKET_v4",
+    "OAI_ARTIFACT_CARTRIDGES_MODULAR_PACKET_v5",
+    "0_kernel/adjudication_carryforward/source_handoffs",
+    "0_kernel/fixtures",
+    "0_kernel/releases",
+    "0_kernel/staging",
+    "0_kernel/vendor",
+    "runtime/audit_packets",
+    "runtime/audits",
+    "runtime/backups",
+    "runtime/exports",
+    "runtime/handoffs",
+    "runtime/logs",
+    "runtime/receipts",
+    "runtime/research",
+    "runtime/state",
+    "runtime/tool_cache",
+    "runtime/work",
+    "_bts",
+    "_mutation_receipts",
+    "_registry_backups",
+    "locks"
+  ],
+  "exclude_globs": [
+    "*.sha256",
+    "*.pyc",
+    "*.pyo",
+    "*.tmp",
+    "*.orig",
+    "*.rej",
+    "*~",
+    "*.backup",
+    "*.backup_*",
+    "*.bak",
+    "*.bak_*",
+    "*_bak_*",
+    "*.before_*",
+    "*.tar",
+    "*.tar.gz",
+    "*.tgz",
+    "*.tar.zst",
+    "*.zip",
+    "*.7z",
+    "*.whl"
+  ],
+  "direct_blocker_rules": {
+    "ruff": [
+      "E999",
+      "F601",
+      "F811",
+      "F821"
+    ],
+    "mypy": [
+      "name-defined",
+      "syntax"
+    ]
+  },
+  "provisional_categories": [
+    "archive_traversal",
+    "command_injection",
+    "github_actions_interpolation",
+    "secret",
+    "dependency_vulnerability",
+    "security_static"
+  ]
+}

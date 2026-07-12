@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mb.sarp.agent_attack.v1",
+  "title": "SARP Agent Attack Verdict",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "schema": {
+      "const": "mb.sarp.agent_attack.v1"
+    },
+    "round_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agent": {
+      "type": "object",
+      "required": [
+        "name",
+        "role",
+        "surface"
+      ]
+    },
+    "packet": {
+      "type": "object",
+      "required": [
+        "manifest_path_or_url",
+        "primary_archive_or_issue",
+        "sha256_verified"
+      ]
+    },
+    "verdict": {
+      "enum": [
+        "APPROVED",
+        "APPROVED_WITH_CONDITIONS",
+        "CHANGES_REQUESTED",
+        "REJECTED",
+        "BLOCKED_INSUFFICIENT_EVIDENCE"
+      ]
+    },
+    "attack_summary": {
+      "type": "string"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "severity",
+          "status",
+          "claim",
+          "suggested_improvement"
+        ],
+        "properties": {
+          "severity": {
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "info"
+            ]
+          },
+          "status": {
+            "enum": [
+              "open",
+              "resolved",
+              "accepted_risk",
+              "not_reproducible"
+            ]
+          }
+        }
+      }
+    },
+    "required_improvements": {
+      "type": "array"
+    },
+    "ready_for_next_round": {
+      "type": "boolean"
+    },
+    "implementation_authorized": {
+      "const": false
+    },
+    "promotion_authorized": {
+      "const": false
+    },
+    "github_write_authorized": {
+      "const": false
+    },
+    "merge_authorized": {
+      "const": false
+    }
+  },
+  "required": [
+    "schema",
+    "round_id",
+    "agent",
+    "packet",
+    "verdict",
+    "findings",
+    "required_improvements",
+    "ready_for_next_round",
+    "implementation_authorized",
+    "promotion_authorized",
+    "github_write_authorized",
+    "merge_authorized"
+  ]
+}

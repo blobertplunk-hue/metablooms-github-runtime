@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mb.github_connector.sarp_verdict.v1",
+  "title": "GitHub Connector SARP Verdict",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "schema": {
+      "const": "mb.github_connector.sarp_verdict.v1"
+    },
+    "verdict": {
+      "enum": [
+        "APPROVED",
+        "APPROVED_WITH_CONDITIONS",
+        "REJECTED",
+        "BLOCKED_INSUFFICIENT_EVIDENCE",
+        "CHANGES_REQUESTED"
+      ]
+    },
+    "reviewer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "packet": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "manifest_path_or_url": {
+          "type": "string"
+        },
+        "primary_archive_or_issue": {
+          "type": "string"
+        },
+        "sha256_verified": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "manifest_path_or_url",
+        "primary_archive_or_issue",
+        "sha256_verified"
+      ]
+    },
+    "bounded_question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision_summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "findings": {
+      "type": "array"
+    },
+    "conditions": {
+      "type": "array"
+    },
+    "blocked_actions": {
+      "type": "array",
+      "contains": {
+        "const": "promotion"
+      }
+    },
+    "implementation_authorized": {
+      "const": false
+    },
+    "promotion_authorized": {
+      "const": false
+    },
+    "github_write_authorized": {
+      "const": false
+    },
+    "merge_authorized": {
+      "const": false
+    },
+    "next_allowed_action": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "required": [
+    "schema",
+    "verdict",
+    "reviewer",
+    "packet",
+    "bounded_question",
+    "decision_summary",
+    "blocked_actions",
+    "implementation_authorized",
+    "promotion_authorized",
+    "github_write_authorized",
+    "merge_authorized",
+    "next_allowed_action"
+  ]
+}

@@ -1,0 +1,83 @@
+{
+  "candidate_sha256": "e20e81fea626717602ce148b483dd39f8b9db2450c98a7fe58dc9fdaf0383673",
+  "core_rule": "The runner may report warnings, but no finding may affect PASS/FAIL unless it is candidate-bound, in active first-party scope, reproducible, normalized, deduplicated, and either directly proven or governed by an exact evidence-backed rule.",
+  "created_at_utc": "2026-07-11T12:22:00Z",
+  "current_known_state": {
+    "candidate_bound_m14_passed_lanes": 0,
+    "candidate_mutated_after_freeze": false,
+    "candidate_origin": "Stage071N V4 R1 cold-validated bootable OS checkpoint",
+    "candidate_status": "SUPERSEDING_NONCANONICAL_INSPECTION_CANDIDATE",
+    "historical_candidate_bound_lanes_passed": 5,
+    "historical_candidate_sha256": "7104bd71881f21ad160e77f311bc8513279ae18cc2b7e3c33a9075670b3c0758",
+    "historical_lane_receipts_transferable": false,
+    "m14_required_lanes": 6,
+    "mypy_substantive_check_completed_on_new_candidate": false,
+    "v3_blocking_reports_on_historical_candidate": 131
+  },
+  "determinism_gates": [
+    "Same candidate plus same tool versions must yield the same normalized finding ledger.",
+    "Scope manifest must hash-match every included file and explain every exclusion class.",
+    "All raw reports must hash-match the evidence manifest.",
+    "A second normalization pass over the same reports must produce byte-identical blocker output."
+  ],
+  "execution_sequence": [
+    "Run the self-contained V4 R3 package against the bundled candidate.",
+    "Ingest the complete raw return and deduplicate/adjudicate candidate-bound findings.",
+    "Repair confirmed defects in a quarantined copy.",
+    "Run local regressions and freeze a repaired noncanonical candidate.",
+    "Run a fresh V4 inspection against the repaired digest.",
+    "If V4 returns PASS, rerun all six candidate-bound M14 lanes for that digest."
+  ],
+  "false_positive_controls": [
+    "No blanket ignores and no threshold lowering.",
+    "Every suppression must be exact-path, exact-rule, candidate-digest-bound, evidence-backed, time-limited, and independently reviewable.",
+    "Test/fixture/generated material is removed from active scope instead of broadly suppressed.",
+    "Dependency findings require package ecosystem and authoritative fixed-version evidence.",
+    "Secret findings require proof that the value is live/non-placeholder before becoming a blocker.",
+    "Archive traversal and command-injection findings require a reachable path or a reproducing attack fixture before becoming blockers.",
+    "A scanner disagreement remains visible; it cannot be silently discarded."
+  ],
+  "next_stage": "RUN_SELF_CONTAINED_V4_R3_THEN_REPAIR_NEW_CANDIDATE_IN_QUARANTINE",
+  "prohibited_shortcuts": [
+    "Do not make V4 pass by hiding findings.",
+    "Do not reuse old candidate-bound PASS receipts as certification for a new digest.",
+    "Do not mutate the live root or canonical pointer.",
+    "Do not authorize M08B, credentials, crawler activation, or external writes."
+  ],
+  "purpose": "Make V4 produce a trustworthy PASS/FAIL/BLOCKED verdict without counting unproven or out-of-scope findings as blockers.",
+  "required_repairs": {
+    "candidate": [
+      "Repair confirmed undefined names and missing atomic-writer imports.",
+      "Repair duplicate dictionary keys, import redefinitions, and syntax defects.",
+      "Repair confirmed unsafe archive extraction paths.",
+      "Remove or safely constrain shell=True command execution.",
+      "Repair GitHub Actions context interpolation that can reach shell commands.",
+      "Run local regressions before freezing a new noncanonical candidate digest."
+    ],
+    "harness": [
+      "Invoke SAST tools with the exact file manifest rather than recursive dot scans.",
+      "Exclude fixtures, backups, generated evidence, archived packets, vendor trees, and duplicate roots before scanning.",
+      "Preserve raw stdout, stderr, JSON, command line, version, start/end time, and exit code for every tool.",
+      "Normalize candidate-relative paths and deduplicate identical findings by tool/rule/path/line/fingerprint.",
+      "Cluster cross-tool reports of the same root cause without discarding source reports.",
+      "Treat parser errors, unsupported files, missing reports, and incomplete mypy execution as BLOCKED rather than PASS.",
+      "Include Trivy secret results and Semgrep scanner errors in the summary and verdict.",
+      "Use ecosystem-aware dependency adjudication so distro backports are not mislabeled by generic version matching.",
+      "Ship a top-level RUN_ANALYZERS.cmd and cold-test extraction, WSL path conversion, output copy, and sidecar creation."
+    ]
+  },
+  "schema": "mb.stage071n.v4.no_fake_blockers.acceptance_contract.v1",
+  "success_semantics": {
+    "blocked": "Any missing tool, parse/coverage gap, corrupt report, candidate mismatch, or incomplete scan.",
+    "candidate_pass": "Runner success plus zero unresolved true blockers after exact candidate repairs.",
+    "fail": "At least one unresolved true blocker remains.",
+    "pass": "Zero unresolved true blockers and zero coverage/integrity gaps.",
+    "runner_success": "All eight analyzers execute completely, reports are preserved, scope and candidate binding verify, parser coverage is complete, and verdict generation is deterministic."
+  },
+  "supersession": {
+    "lane_credit_reset_required": true,
+    "reason": "Historical candidate bytes were unavailable; user required the candidate to ship inside the runner bundle.",
+    "superseded_candidate_sha256": "7104bd71881f21ad160e77f311bc8513279ae18cc2b7e3c33a9075670b3c0758",
+    "superseding_candidate_sha256": "e20e81fea626717602ce148b483dd39f8b9db2450c98a7fe58dc9fdaf0383673"
+  }
+}

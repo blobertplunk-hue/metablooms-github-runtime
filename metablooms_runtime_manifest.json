@@ -1,0 +1,38 @@
+{
+  "schema": "mb.github_runtime.manifest.v1",
+  "runtime_name": "MetaBlooms OS",
+  "runtime_archive": {
+    "filename": "METABLOOMS_OS_STAGE071N_V4_R5_REPAIRED_CANDIDATE_20260711T1518.tar.zst",
+    "sha256": "5866f9754b922c77653cd0745fe27bb729902c4332b43f542221d6ba7c823c2b",
+    "size_bytes": 170394097,
+    "top_level_directory": "Metablooms_OS",
+    "storage": {
+      "preferred": "github_release_asset",
+      "release_tag": "metablooms-os-r5",
+      "url_env_var": "METABLOOMS_RUNTIME_URL",
+      "local_fallbacks": [
+        "outputs/METABLOOMS_OS_STAGE071N_V4_R5_REPAIRED_CANDIDATE_20260711T1518.tar.zst",
+        "artifacts/METABLOOMS_OS_STAGE071N_V4_R5_REPAIRED_CANDIDATE_20260711T1518.tar.zst"
+      ]
+    }
+  },
+  "boot": {
+    "entrypoint": "Metablooms_OS/boot.py",
+    "safe_probe_args": [
+      "--help"
+    ],
+    "full_boot_args": []
+  },
+  "inspection": {
+    "factory": "metablooms_sandbox_factory/run_pipeline.py",
+    "expected_v4_pass_candidate_sha256": "5866f9754b922c77653cd0745fe27bb729902c4332b43f542221d6ba7c823c2b"
+  },
+  "agents": [
+    "ChatGPT",
+    "Codex",
+    "Claude Code",
+    "Grok",
+    "GitHub Actions",
+    "any GitHub-capable coding agent"
+  ]
+}

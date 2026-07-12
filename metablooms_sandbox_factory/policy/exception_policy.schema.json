@@ -1,0 +1,20 @@
+{
+  "schema": "mb.sandbox_factory.exception_policy_schema.v1",
+  "required_fields": [
+    "candidate_sha256",
+    "tool",
+    "path",
+    "exception_type",
+    "reason"
+  ],
+  "allowed_exception_types": [
+    "semgrep_partial_parse_warning"
+  ],
+  "rules": [
+    "Exceptions are never global.",
+    "Exceptions must be bound to an exact candidate SHA-256.",
+    "Exceptions must preserve the original raw report.",
+    "Exceptions must stay visible in normalized findings or parser exception output."
+  ]
+}
+
