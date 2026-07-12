@@ -1,0 +1,58 @@
+name: Multi-Agent SARP Convergence Round
+description: Collect adversarial SARP attacks from multiple agents before ChatGPT MetaBlooms synthesis.
+title: "[SARP-CONVERGENCE] "
+labels:
+  - sarp
+  - sarp-round
+  - convergence
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This issue coordinates adversarial SARP review. It does not authorize implementation, promotion, merge, push, publication, or rollout.
+  - type: input
+    id: round_id
+    attributes:
+      label: Round ID
+      placeholder: stage071n-r1
+    validations:
+      required: true
+  - type: input
+    id: packet
+    attributes:
+      label: Packet manifest/archive/issue
+      placeholder: Link to the SARP packet or manifest.
+    validations:
+      required: true
+  - type: textarea
+    id: bounded_question
+    attributes:
+      label: Bounded question
+      placeholder: What exact SARP decision should the agents attack?
+    validations:
+      required: true
+  - type: textarea
+    id: requested_agents
+    attributes:
+      label: Requested agent roles
+      value: |
+        - security_attacker
+        - governance_attacker
+        - evidence_attacker
+        - github_connector_attacker
+        - operator_workflow_attacker
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Non-authorization boundary
+      options:
+        - label: This round does not authorize implementation.
+          required: true
+        - label: This round does not authorize promotion or canonical publication.
+          required: true
+        - label: This round does not authorize GitHub writes except SARP comments.
+          required: true
+        - label: This round does not authorize merge, push, hosted publication, or rollout.
+          required: true

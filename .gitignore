@@ -1,0 +1,7 @@
+artifacts/
+runtime_work/
+metablooms_sandbox_factory/runs/
+metablooms_sandbox_factory/input/
+metablooms_sandbox_factory/outputs/
+__pycache__/
+*.pyc

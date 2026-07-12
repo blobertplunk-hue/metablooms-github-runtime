@@ -1,0 +1,65 @@
+name: SARP Agent Review
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "SARP issue number to review"
+        required: true
+        type: number
+      provider:
+        description: "Agent provider"
+        required: true
+        default: "free"
+        type: choice
+        options:
+          - free
+          - stub
+          - openai
+          - anthropic
+          - xai
+      post_comment:
+        description: "Post verdict back to the issue"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sarp-agent-review:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      XAI_MODEL: ${{ vars.XAI_MODEL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Dispatch SARP issue to selected agent
+        run: |
+          python3 scripts/sarp_agent_bridge.py \
+            --owner "${{ github.repository_owner }}" \
+            --repo "${{ github.event.repository.name }}" \
+            --issue-number "${{ inputs.issue_number }}" \
+            --provider "${{ inputs.provider }}" \
+            ${{ inputs.post_comment && '--post-comment' || '' }} \
+            --out runtime_work/SARP_AGENT_VERDICT.md
+      - name: Validate generated SARP verdict
+        run: python3 scripts/sarp_connector.py validate-verdict --file runtime_work/SARP_AGENT_VERDICT.md --receipt runtime_work/SARP_AGENT_VERDICT_VALIDATION.json
+      - name: Upload SARP verdict artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sarp-agent-verdict
+          path: |
+            runtime_work/SARP_AGENT_VERDICT.md
+            runtime_work/SARP_AGENT_VERDICT_VALIDATION.json

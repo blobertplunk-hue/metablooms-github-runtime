@@ -1,0 +1,36 @@
+name: SARP Convergence Synthesize
+
+on:
+  workflow_dispatch:
+    inputs:
+      round_dir:
+        description: "Round directory containing verdicts/"
+        required: true
+        default: "sarp/rounds/current"
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  synthesize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Synthesize convergence report
+        run: |
+          python3 scripts/sarp_roundtrip.py synthesize \
+            --round-dir "${{ inputs.round_dir }}" \
+            --out "${{ inputs.round_dir }}/SARP_CONVERGENCE_REPORT.md" || true
+      - name: Upload convergence report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sarp-convergence-report
+          path: |
+            ${{ inputs.round_dir }}/SARP_CONVERGENCE_REPORT.md
+            ${{ inputs.round_dir }}/SARP_CONVERGENCE_REPORT.json

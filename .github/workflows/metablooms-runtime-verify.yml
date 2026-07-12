@@ -1,0 +1,39 @@
+name: MetaBlooms Runtime Verify
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_url:
+        description: "Optional URL for the MetaBlooms runtime archive"
+        required: false
+        type: string
+  push:
+    paths:
+      - "scripts/**"
+      - "metablooms_sandbox_factory/**"
+      - "metablooms_runtime_manifest.json"
+      - "AGENTS.md"
+      - ".github/workflows/metablooms-runtime-verify.yml"
+
+jobs:
+  verify-runtime:
+    runs-on: ubuntu-latest
+    env:
+      METABLOOMS_RUNTIME_URL: ${{ inputs.runtime_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify runtime archive
+        run: python3 scripts/metablooms_runtime.py --verify-only
+      - name: Safe boot probe
+        run: python3 scripts/metablooms_runtime.py --boot
+      - name: Upload runtime receipt
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: metablooms-runtime-receipt
+          path: runtime_work/METABLOOMS_RUNTIME_RECEIPT.json

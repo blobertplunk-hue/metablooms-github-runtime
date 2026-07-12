@@ -1,0 +1,55 @@
+name: External SARP Review
+description: Request bounded external SARP review through a GitHub-capable agent.
+title: "[SARP] "
+labels:
+  - sarp
+  - external-review
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this issue for External SARP review only. This issue does not authorize implementation, promotion, merge, push, publication, or rollout.
+  - type: input
+    id: packet_manifest
+    attributes:
+      label: SARP packet manifest path or URL
+      description: Link to the mb.sarp_delivery.manifest.v1 manifest.
+      placeholder: artifacts/SARP_ONLY__SEND_TO_EXTERNAL_SARP/3_SARP_FILE_MANIFEST.json
+    validations:
+      required: true
+  - type: input
+    id: primary_archive
+    attributes:
+      label: Primary SARP archive or packet URL
+      description: Exactly one SARP packet/archive should be primary.
+      placeholder: SEND_THIS_TO_EXTERNAL_SARP__example.tar.gz
+    validations:
+      required: true
+  - type: textarea
+    id: bounded_question
+    attributes:
+      label: Bounded question
+      description: What exact decision should SARP make?
+      placeholder: Does this packet preserve fail-closed behavior while closing the named findings?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence links
+      description: List only evidence needed for SARP review.
+    validations:
+      required: true
+  - type: checkboxes
+    id: non_authorization
+    attributes:
+      label: Non-authorization boundary
+      options:
+        - label: This SARP request does not authorize promotion.
+          required: true
+        - label: This SARP request does not authorize GitHub or connector writes except SARP comments.
+          required: true
+        - label: This SARP request does not authorize merge, operator push, hosted publication, or broader rollout.
+          required: true
+        - label: Implementation requires a separate explicit user authorization.
+          required: true
