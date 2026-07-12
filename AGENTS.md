@@ -8,6 +8,28 @@ repository.
 
 Read `metablooms_runtime_manifest.json`.
 
+## Codex Autoboot MPP
+
+When a user asks to boot, continue, inspect, or operate MetaBlooms from this
+repository, follow this Multi-Phase Protocol before making changes:
+
+1. Research: read `AGENTS.md`, `metablooms_runtime_manifest.json`, and the
+   relevant task document. Confirm repository, branch, release tag, archive
+   filename, SHA-256, and current working directory.
+2. Plan: state the exact boot or inspection path, including what will be
+   verified and what will be considered `BLOCKED`.
+3. Preflight: verify the runtime archive source is available, verify SHA-256,
+   verify safe archive structure, and verify required local tools before
+   running deeper work.
+4. Boot: run `python3 scripts/metablooms_runtime.py --boot` unless the user
+   explicitly asks for `--verify-only`, `--extract`, or `--full-boot`.
+5. Receipt: report `runtime_work/METABLOOMS_RUNTIME_RECEIPT.json`, the archive
+   SHA-256, and the boot verdict. Do not infer success without the receipt.
+
+Fail closed. Missing assets, credential problems, wrong directories, SHA
+mismatches, unsafe archive members, missing tools, parser errors, or incomplete
+receipts are `BLOCKED`, not permission to guess.
+
 ## Runtime Artifact
 
 The full MetaBlooms runtime archive is large and should be supplied as one of:
