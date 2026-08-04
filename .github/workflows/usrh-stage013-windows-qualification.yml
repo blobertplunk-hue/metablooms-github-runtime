@@ -11,15 +11,33 @@ jobs:
     steps:
       - name: Checkout qualification branch
         uses: actions/checkout@v4
-      - name: Acquire and verify exact source packet
+      - name: Reconstruct and verify exact source packet
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
-          $url='https://drive.usercontent.google.com/download?id=1QZxgd11TcQqfTna9CDhoIh8MSk7U6Qio&export=download&confirm=t'
-          Invoke-WebRequest -Uri $url -OutFile usrh-stage013-source.zip -MaximumRedirection 10
-          $actual=(Get-FileHash usrh-stage013-source.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($actual -ne 'bd3131ef3dfdc64d77ffafa64cac648f514a7784466887be0ca9e150c699b0f3'){throw "source packet hash mismatch: $actual"}
-          Expand-Archive usrh-stage013-source.zip source -Force
+          $expectedChunks=[ordered]@{
+            'chunk-00.b64'='80eda14163ad2888f905dd3eea6e5d3f83d8b5bf8286629fa00e4feaa6619dd7'
+            'chunk-01.b64'='8cf723d22451542b45da4cac665dc9ad49a4d4b3f70c32f73cfa894791cfdf88'
+            'chunk-02.b64'='9580e9752e4272d32f6a293e3c5ebea4a96bb24e99d190e1facc25c95c129f2c'
+            'chunk-03.b64'='2ed6e6df9c167fb58362ce853e79926a30345a7d087265b20e6cf618ab992f22'
+          }
+          $parts=Get-ChildItem usrh-stage013-payload/chunk-*.b64 | Sort-Object Name
+          if($parts.Count -ne 4){throw "expected four source chunks; found $($parts.Count)"}
+          foreach($part in $parts){
+            $actual=(Get-FileHash $part.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $expected=$expectedChunks[$part.Name]
+            if($actual -ne $expected){throw "chunk hash mismatch $($part.Name): $actual"}
+          }
+          $b64=($parts | ForEach-Object {(Get-Content $_.FullName -Raw).Trim()}) -join ''
+          $b64Bytes=[Text.Encoding]::ASCII.GetBytes($b64)
+          $b64Hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($b64Bytes)).ToLowerInvariant()
+          if($b64Hash -ne '3b4d7f2cbf3f0bb9cef60ff61ee3688593bbb6eb605581d8ab2dda3a331e6efc'){throw "aggregate base64 hash mismatch: $b64Hash"}
+          [IO.File]::WriteAllBytes('usrh-stage013-ci.tar.xz',[Convert]::FromBase64String($b64))
+          $archiveHash=(Get-FileHash usrh-stage013-ci.tar.xz -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($archiveHash -ne 'be5c9f9272ee72c375a7064df45bbca3359924ad4dd9a9bdf7e3b8da3ddd5299'){throw "source archive hash mismatch: $archiveHash"}
+          New-Item source -ItemType Directory -Force | Out-Null
+          tar -xJf usrh-stage013-ci.tar.xz -C source
+          if($LASTEXITCODE -ne 0){throw 'source extraction failed'}
       - name: Acquire and verify Node 22.16.0 Windows x64
         shell: pwsh
         run: |
@@ -115,7 +133,8 @@ jobs:
             decision='PASS_WINDOWS_COLD_MACHINE_RELEASE_CANDIDATE'
             runner=$env:RUNNER_NAME
             os=$env:RUNNER_OS
-            source_zip_sha256=(Get-FileHash usrh-stage013-source.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+            source_archive_sha256='be5c9f9272ee72c375a7064df45bbca3359924ad4dd9a9bdf7e3b8da3ddd5299'
+            source_base64_sha256='3b4d7f2cbf3f0bb9cef60ff61ee3688593bbb6eb605581d8ab2dda3a331e6efc'
             release_zip=(Split-Path $env:USRH_RELEASE_ZIP -Leaf)
             release_zip_sha256=(Get-FileHash $env:USRH_RELEASE_ZIP -Algorithm SHA256).Hash.ToLowerInvariant()
             extension_id=$manifest.extensionId
