@@ -38,60 +38,23 @@ jobs:
           New-Item source -ItemType Directory -Force | Out-Null
           tar -xJf usrh-stage013-ci.tar.xz -C source
           if($LASTEXITCODE -ne 0){throw 'source extraction failed'}
-      - name: Repair and syntax-check Pester harness
+      - name: Install canonical Pester harness and syntax-check
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
           $path='source/tests/windows/cold-machine.Tests.ps1'
           $expectedOriginal='cf53fcb7a863007b3874cb8e7bb1d640036fd57c4abc815ab6886cea5b1f1310'
-          $expectedIntermediate='4061c39a21f1b3951a96e53492ce213424e87ef6530d07aaaa31b91801b5588a'
-          $expectedPatched='c3991a24f79ab7752dcbbc96ac3d3b604d3355ef07b36de4ae9c29803eeed52c'
+          $expectedPatched='4bcc0a4ada905e12c249f63a1379ff877efcb6f10934e09a166e87dc8222a4b5'
           $actual=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
           if($actual -ne $expectedOriginal){throw "unexpected original harness hash: $actual"}
-          $text=[IO.File]::ReadAllText($path)
-          $old=(
-            '$ReleaseRoot=[IO.Path]::GetFullPath($env:USRH_RELEASE_ROOT)',
-            '$InstallRoot=Join-Path $TestDrive ''URH''',
-            '$Manifest=Get-Content (Join-Path $ReleaseRoot ''release/RELEASE_MANIFEST.json'') -Raw | ConvertFrom-Json -Depth 100',
-            ''
-          ) -join "`n"
-          if(-not $text.Contains($old)){throw 'top-level TestDrive block not found'}
-          $text=$text.Replace($old,'')
-          $needle="Describe 'Universal Resource Harvester cold-machine release' {`n"
-          $replacement=(
-            "Describe 'Universal Resource Harvester cold-machine release' {",
-            '    BeforeAll {',
-            '        $script:ReleaseRoot=[IO.Path]::GetFullPath($env:USRH_RELEASE_ROOT)',
-            '        $script:InstallRoot=Join-Path $TestDrive ''URH''',
-            '        $script:Manifest=Get-Content (Join-Path $script:ReleaseRoot ''release/RELEASE_MANIFEST.json'') -Raw | ConvertFrom-Json -Depth 100',
-            '    }',
-            ''
-          ) -join "`n"
-          if(-not $text.Contains($needle)){throw 'Describe block not found'}
-          $text=$text.Replace($needle,$replacement)
-          [IO.File]::WriteAllText($path,$text,[Text.UTF8Encoding]::new($false))
-          $intermediate=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($intermediate -ne $expectedIntermediate){throw "intermediate harness hash mismatch: $intermediate"}
-          $text=[IO.File]::ReadAllText($path)
-          $oldHost=(
-            '        $host=Join-Path $InstallRoot ''payload/bin/usrh-native-host.exe''',
-            '        $psi=[Diagnostics.ProcessStartInfo]::new($host)',
-            ''
-          ) -join "`n"
-          $newHost=(
-            '        $hostPath=Join-Path $InstallRoot ''payload/bin/usrh-native-host.exe''',
-            '        $psi=[Diagnostics.ProcessStartInfo]::new($hostPath)',
-            ''
-          ) -join "`n"
-          if(-not $text.Contains($oldHost)){throw 'reserved Host variable assignment not found'}
-          $text=$text.Replace($oldHost,$newHost)
-          [IO.File]::WriteAllText($path,$text,[Text.UTF8Encoding]::new($false))
+          $canonicalBase64='IyBSZXF1aXJlcyAtVmVyc2lvbiA3LjQKIyBSZXF1aXJlcyAtTW9kdWxlcyBQZXN0ZXIKJEVycm9yQWN0aW9uUHJlZmVyZW5jZT0nU3RvcCcKRGVzY3JpYmUgJ1VuaXZlcnNhbCBSZXNvdXJjZSBIYXJ2ZXN0ZXIgY29sZC1tYWNoaW5lIHJlbGVhc2UnIHsKICAgIEJlZm9yZUFsbCB7CiAgICAgICAgJHNjcmlwdDpSZWxlYXNlUm9vdD1bSU8uUGF0aF06OkdldEZ1bGxQYXRoKCRlbnY6VVNSSF9SRUxFQVNFX1JPT1QpCiAgICAgICAgJHNjcmlwdDpJbnN0YWxsUm9vdD1Kb2luLVBhdGggJFRlc3REcml2ZSAnVVJIXycKICAgICAgICAkc2NyaXB0Ok1hbmlmZXN0PUdldC1Db250ZW50IChKb2luLVBhdGggJHNjcmlwdDpSZWxlYXNlUm9vdCAncmVsZWFzZS9SRUxFQVNFX01BTklGRVNULmpzb24nKSAtUmF3IHwgQ29udmVydEZyb20tSnNvbiAtRGVwdGggMTAwCiAgICAgICAgZnVuY3Rpb24gc2NyaXB0OlJlYWQtTmF0aXZlRnJhbWUoW0lPLlN0cmVhbV0kU3RyZWFtKXsKICAgICAgICAgICAgJGhlYWRlcj1OZXctT2JqZWN0IGJ5dGVbXSA0OyAkb2Zmc2V0PTAKICAgICAgICAgICAgd2hpbGUoJG9mZnNldCAtbHQgNCl7JG49JFN0cmVhbS5SZWFkKCRoZWFkZXIsJG9mZnNldCw0LSRvZmZzZXQpO2lmKCRuIC1sZSAwKXt0aHJvdyAnbmF0aXZlIGhvc3QgY2xvc2VkIGJlZm9yZSBmcmFtZSBoZWFkZXInfTskb2Zmc2V0Kz0kbn0KICAgICAgICAgICAgJGxlbmd0aD1bQml0Q29udmVydGVyXTo6VG9VaW50MzIoJGhlYWRlciwwKTsgaWYoJGxlbmd0aCAtZ3QgMTA0ODU3Nil7dGhyb3cgIm5hdGl2ZSBmcmFtZSB0b28gbGFyZ2U6ICRsZW5ndGgifQogICAgICAgICAgICAkYm9keT1OZXctT2JqZWN0IGJ5dGVbXSAkbGVuZ3RoOyAkb2Zmc2V0PTAKICAgICAgICAgICAgd2hpbGUoJG9mZnNldCAtbHQgJGxlbmd0aCl7JG49JFN0cmVhbS5SZWFkKCRib2R5LCRvZmZzZXQsJGxlbmd0aC0kb2Zmc2V0KTtpZigkbiAtbGUgMCl7dGhyb3cgJ25hdGl2ZSBob3N0IGNsb3NlZCBiZWZvcmUgZnJhbWUgYm9keSd9OyRvZmZzZXQrPSRufQogICAgICAgICAgICByZXR1cm4gKFtUZXh0LkVuY29kaW5nXTo6VVRGOC5HZXRTdHJpbmcoJGJvZHkpIHwgQ29udmVydEZyb20tSnNvbiAtRGVwdGggMTAwKQogICAgICAgIH0KICAgICAgICBmdW5jdGlvbiBzY3JpcHQ6V3JpdGUtTmF0aXZlRnJhbWUoW0lPLlN0cmVhbV0kU3RyZWFtLFtvYmplY3RdJE1lc3NhZ2UpewogICAgICAgICAgICAkYm9keT1bVGV4dC5FbmNvZGluZ106OlVURjguR2V0Qnl0ZXMoKCRNZXNzYWdlIHwgQ29udmVydFRvLUpzb24gLURlcHRoIDEwMCAtQ29tcHJlc3MpKQogICAgICAgICAgICAkaGVhZGVyPVtCaXRDb252ZXJ0ZXJdOjpHZXRCeXRlcyhbdWludDMyXSRib2R5Lkxlbmd0aCkKICAgICAgICAgICAgJFN0cmVhbS5Xcml0ZSgkaGVhZGVyLDAsJGhlYWRlci5MZW5ndGgpOyAkU3RyZWFtLldyaXRlKCRib2R5LDAsJGJvZHkuTGVuZ3RoKTsgJFN0cmVhbS5GbHVzaCgpCiAgICAgICAgfQogICAgfQogICAgSXQgJ3ZlcmlmaWVzIGFsbCByZWxlYXNlIGhhc2hlcyBiZWZvcmUgaW5zdGFsbGF0aW9uJyB7CiAgICAgICAgJHJlc3VsdD0mIChKb2luLVBhdGggJFJlbGVhc2VSb290ICdWRVJJRllfSU5TVEFMTC5wczEnKSAtU291cmNlUm9vdCAkUmVsZWFzZVJvb3QgLVZlcmlmeU9ubHkgfCBDb252ZXJ0RnJvbS1Kc29uCiAgICAgICAgJHJlc3VsdC5kZWNpc2lvbiB8IFNob3VsZCAtQmUgJ1BBU1NfUkVMRUFTRV9IQVNIRVMnCiAgICAgICAgJHJlc3VsdC5taXNtYXRjaGVzLkNvdW50IHwgU2hvdWxkIC1CZSAwCiAgICB9CiAgICBJdCAndXNlcyBhIHN0YWJsZSBleHRlbnNpb24gSUQgYW5kIGFuIEhLQ1Utb25seSBwbGFuJyB7CiAgICAgICAgJHBsYW49JiAoSm9pbi1QYXRoICRSZWxlYXNlUm9vdCAnSW5zdGFsbC1Vbml2ZXJzYWxSZXNvdXJjZUhhcnZlc3Rlci5wczEnKSAtU291cmNlUm9vdCAkUmVsZWFzZVJvb3QgLUluc3RhbGxSb290ICRJbnN0YWxsUm9vdCAtUGxhbk9ubHkgfCBDb252ZXJ0RnJvbS1Kc29uCiAgICAgICAgJHBsYW4uZXh0ZW5zaW9uX2lkIHwgU2hvdWxkIC1CZSAkTWFuaWZlc3QuZXh0ZW5zaW9uSWQKICAgICAgICAkcGxhbi5yZWdpc3RyeV9zY29wZSB8IFNob3VsZCAtQmUgJ0hLQ1UnCiAgICAgICAgJHBsYW4ucmVxdWlyZXNfYWRtaW4gfCBTaG91bGQgLUJlRmFsc2UKICAgICAgICBAKCRwbGFuLnJlZ2lzdHJ5X2tleXMpLkNvdW50IHwgU2hvdWxkIC1CZSAyCiAgICB9CiAgICBJdCAnaW5zdGFsbHMgd2l0aG91dCBhZG1pbmlzdHJhdG9yIHJpZ2h0cyBhbmQgcmVnaXN0ZXJzIGJvdGggYnJvd3NlcnMnIHsKICAgICAgICAkcmVzdWx0PSYgKEpvaW4tUGF0aCAkUmVsZWFzZVJvb3QgJ0luc3RhbGwtVW5pdmVyc2FsUmVzb3VyY2VIYXJ2ZXN0ZXIucHMxJykgLVNvdXJjZVJvb3QgJFJlbGVhc2VSb290IC1JbnN0YWxsUm9vdCAkSW5zdGFsbFJvb3QgLU5vT3BlbkV4cGxvcmVyIHwgQ29udmVydEZyb20tSnNvbgogICAgICAgICRyZXN1bHQuZGVjaXNpb24gfCBTaG91bGQgLUJlICdJTlNUQUxMRUQnCiAgICAgICAgVGVzdC1QYXRoIChKb2luLVBhdGggJEluc3RhbGxSb290ICdwYXlsb2FkL3J1bnRpbWUvbm9kZS5leGUnKSB8IFNob3VsZCAtQmVUcnVlCiAgICAgICAgVGVzdC1QYXRoIChKb2luLVBhdGggJEluc3RhbGxSb290ICdwYXlsb2FkL3J1bnRpbWUvcGFnZWZpbmQuZXhlJykgfCBTaG91bGQgLUJlVHJ1ZQogICAgICAgIFRlc3QtUGF0aCAoSm9pbi1QYXRoICRJbnN0YWxsUm9vdCAncGF5bG9hZC9iaW4vdXNy aC1uYXRpdmUtaG9zdC5leGUnKS B8IFNob3VsZCAtQmVUcnVlCiAgICAgICAgZm9yZWFjaCgka2V5IGluIEAoJHJlc3VsdC5yZWdpc3RyeV9rZXlzKSl7IFRlc3QtUGF0aCAka2V5IHwgU2hvdWxkIC1CZVRydWUgfQogICAgfQogICAgSXQgJ2NvbXBsZXRlcyBhIG5hdGl2ZSBoYW5kc2hha2UgYW5kIHN5bnRoZXRpYyBjcmF3bCByb3VuZCB0cmlwJyB7CiAgICAgICAgJGhvc3RQYXRoPUpvaW4tUGF0aCAkSW5zdGFsbFJvb3QgJ3BheWxvYWQvYmluL3Vzc mgtbmF0aXZlLWhvc3QuZXhlJwogICAgICAgICRwc2k9W0RpYWdub3N0aWNzLlByb2Nlc3NTdGFydEluZm9dOjpuZXcoJGhvc3RQYXRoKQogICAgICAgICRwc2kuVXNlU2hlbGxFeGVjdXRlPSRmYWxzZTsgJHBzaS5SZWRpcmVjdFN0YW5kYXJkSW5wdXQ9JHRydWU7ICRwc2kuUmVkaXJlY3RTdGFuZGFyZE91dHB1dD0kdHJ1ZTsgJHBzaS5SZWRpcmVjdFN0YW5kYXJkRXJyb3I9JHRydWUKICAgICAgICAkcHNpLkVudmlyb25tZW50WydVU1JIX0RCX1BBVEgnXT0oSm9pbi1QYXRoICRUZXN0RHJpdmUgJ2NvbGQtbWFjaGluZS5zcWxpdGUnKQogICAgICAgICRwcm9jZXNzPVtEaWFnbm9zdGljcy5Qcm9jZXNzXTo6U3RhcnQoJHBzaSkKICAgICAgICB0cnkgewogICAgICAgICAgICAkcmVhZHk9UmVhZC1OYXRpdmVGcmFtZSAkcHJvY2Vzcy5TdGFuZGFyZE91dHB1dC5CYXNlU3RyZWFtCiAgICAgICAgICAgICRyZWFkeS50eXBlIHwgU2hvdWxkIC1CZSAnaG9zdC5yZWFkeScKICAgICAgICAgICAgJHRva2VuPVtzdHJpbmddJHJlYWR5LnBheWxvYWQuY2FwYWJpbGl0eVRva2VuCiAgICAgICAgICAgICRzdGFydD1bb3JkZXJlZF1AewogICAgICAgICAgICAgICAgcHJvdG9jb2xWZXJzaW9uPScxLjAnO2pvYklkPSdjb2xkLW1hY2hpbmUtam9iJztzZXF1ZW5jZT0xO3R5cGU9J2pvYi5zdGFydCc7Y2FwYWJpbGl0eVRva2VuPSR0b2tlbgogICAgICAgICAgICAgICAgcGF5bG9hZD1bb3JkZXJlZF1AewogICAgICAgICAgICAgICAgICAgIHNlZWRVcmw9J2h0dHA6Ly8xMjcuMC4wLjE6ODc2NS9zdGFydCc7CiAgICAgICAgICAgICAgICAgICAgc2NvcGU9W29yZGVyZWRdQHttb2RlPSdzbWFydCc7YWxsb3dlZEhvc3RzPUAoJzEyNy4wLjAuMScpO2FsbG93ZWRQYXRoUHJlZml4ZXM9QCgnLycpO3Rlcm1pbmFsUmVzb3VyY2VIb3N0cz1AKCk7bGltaXRzPVtvcmRlcmVkXUB7bWF4UGFnZXM9NTttYXhEZXB0aD0xO21heEJ5dGVzPTEwNDg1NzY7bWF4UnVudGltZVNlY29uZHM9NjA7bWF4UmVxdWVzdHNQZXJNaW51dGU9MzA7bWF4RXh0ZXJuYWxIb3BzPTB9fQogICAgICAgICAgICAgICAgICAgIGF1dGhvcml6YXRpb249W29yZGVyZWRdQHthcnRpZmFjdFNoYTI1Nj0oJ2EnKjY0KTthbGxvd2VkQWN0aW9ucz1AKCduYXZpZ2F0ZScsJ2Rvd25sb2FkJyk7Zm9yYmlkZGVuRGF0YUNsYXNzZXM9QCgnY3JlZGVudGlhbHMnLCdjb29raWVzJywnYXV0aG9yaXphdGlvbi1oZWFkZXJzJywnYnJvd3Nlci1zdG9yYWdlJywnc3R1ZGVudC1yZWNvcmRzJyl9CiAgICAgICAgICAgICAgICB9CiAgICAgICAgICAgIH0KICAgICAgICAgICAgV3JpdGUtTmF0aXZlRnJhbWUgJHByb2Nlc3MuU3RhbmRhcmRJbnB1dC5CYXNlU3RyZWFtICRzdGFydAogICAgICAgICAgICAoUmVhZC1OYXRpdmVGcmFtZSAkcHJvY2Vzcy5TdGFuZGFyZE91dHB1dC5CYXNlU3RyZWFtKS50eXBlIHwgU2hvdWxkIC1CZSA nYWNrJwogICAgICAgICAgICAkbGVhc2U9W29yZGVyZWRdQHtwcm90b2NvbFZlcnNpb249JzEuMCc7am9iSWQ9J2NvbGQtbWFjaGluZS1qb2InO3NlcXVlbmNlPTI7dHlwZT0ncGFnZS5sZWFzZSc7Y2FwYWJpbGl0eVRva2VuPSR0b2tlbjt wYXlsb2FkPVtvcmRlcmVkXUB7b3duZXI9J2NvbGQtbWFjaGluZSc7bGVhc2VNcz0zMDAwMH19CiAgICAgICAgICAgIFdyaXRlLU5hdGl2ZUZyYW1lICRwcm9jZXNzLlN0YW5kYXJkSW5wdXQuQmFzZVN0cmVhbSAkbGVhc2UKICAgICAgICAgICAgJGxlYXNlQWNrPVJlYWQtTmF0aXZlRnJhbWUgJHByb2Nlc3MuU3RhbmRhcmRPdXRwdXQuQmFzZVN0cmVhbQogICAgICAgICAgICAkbGVhc2VBY2sudHlwZSB8IFNob3VsZCAtQmUgJ2FjaycKICAgICAgICAgICAgJG9ic2VydmF0aW9uPVtvcmRlcmVkXUB7dXJsPSdodHRwOi8vMTI3LjAuMC4xOjg3NjUvc3RhcnQnO2Nhbm9uaWNhbFVybD0naHR0cDovLzEyNy4wLjAuMTo4NzY1L3N0YXJ0Jzt0aXRsZT0nU3ludGhldGljIFN0YXJ0JztkZXB0aD0wO2xpbmtzPUAoKTtmcmFtZXM9QCgpO2ludGVyYWN0aW9uQ2FuZGlkYXRlcz1AKCk7cHJpdmFjeVNpZ25hbHM9QCgpfQogICAgICAgICAgICAkb2JzZXJ2ZT1bb3JkZXJlZF1Ae3Byb3RvY29sVmVyc2lvbj0nMS4wJztqb2JJZD0nY29sZC1tYWNoaW5lLWpvYic7c2VxdWVuY2U9Mzt0eXBlPSdwYWdlLm9ic2VydmF0aW9uJztjYXBhYmlsaXR5VG9rZW49JHRva2VuO3BheWxvYWQ9W29yZGVyZWRdQHtjYW5vbmljYWxVcmw9JG9ic2VydmF0aW9uLmNhbm9uaWNhbFVybDtvd25lcj0nY29sZC1tYWNoaW5lJztldmVudElkPSdjb2xkLW9ic2VydmF0aW9uLTEnO29ic2VydmF0aW9uPSRvYnNlcnZhdGlvbjtkaXNjb3ZlcmVkPUAoKX19CiAgICAgICAgICAgIFdyaXRlLU5hdGl2ZUZyYW1lICRwcm9jZXNzLlN0YW5kYXJkSW5wdXQuQmFzZVN0cmVhbSAkb2JzZXJ2ZQogICAgICAgICAgICAkb2JzZXJ2ZWQ9UmVhZC1OYXRpdmVGcmFtZSAkcHJvY2Vzcy5TdGFuZGFyZE91dHB1dC5CYXNlU3RyZWFtCiAgICAgICAgICAgICRvYnNlcnZlZC50eXBlIHwgU2hvdWxkIC1CZSA nYWNrJwogICAgICAgICAgICAkb2JzZXJ2ZWQucGF5bG9hZC5hY2NlcHRlZFR5cGUgfCBTaG91bGQgLUJlICdwYWdlLm9ic2VydmF0aW9uJwogICAgICAgIH0gZmluYWxseSB7CiAgICAgICAgICAgIHRyeXskcHJvY2Vzcy5TdGFuZGFyZElucHV0LkNsb3NlKCl9Y2F0Y2h7fQogICAgICAgICAgICBpZigtbm90ICRwcm9jZXNzLldhaXRGb3JFeGl0KDUwMDApKXskcHJvY2Vzcy5LaWxsKCR0cnVlKX0KICAgICAgICAgICAgJHByb2Nlc3MuRGlzcG9zZSgpCiAgICAgICAgfQogICAgfQogICAgSXQgJ3VuaW5zdGFsbHMgYW5kIGNhbiByZWluc3RhbGwgZW50aXJlbHkgZnJvbSB0aGUgbG9jYWwgcmVsZWFzZScgewogICAgICAgICRyZW1vdmVkPSYgKEpvaW4tUGF0aCAkUmVsZWFzZVJvb3QgJ1VuaW5zdGFsbC1Vbml2ZXJzYWxSZXNvdXJjZUhhcnZlc3Rlci5wczEnKSAtSW5zdGFsbFJvb3QgJEluc3RhbGxSb290IC1Ob09wZW5FeHBsb3JlciB8IENvbnZlcnRGcm9tLUpzb24KICAgICAgICAkcmVtb3ZlZC5kZWNpc2lvbiB8IFNob3VsZCAtQmUgJ1VOSU5TVEFMTEVEJwogICAgICAgIFRlc3QtUGF0aCAkSW5zdGFsbFJvb3QgfCBTaG91bGQgLUJlRmFsc2UKICAgICAgICAkYWdhaW49JiAoSm9pbi1QYXRoICRSZWxlYXNlUm9vdCAnSW5zdGFsbC1Vbml2ZXJzYWxSZXNvdXJjZUhhcnZlc3Rlci5wczEnKSAtU291cmNlUm9vdCAkUmVsZWFzZVJvb3QgLUluc3RhbGxSb290ICRJbnN0YWxsUm9vdCAtTm9PcGVuRXhwbG9yZXIgfCBDb252ZXJ0RnJvbS1Kc29uCiAgICAgICAgJGFnYWluLmRlY2lzaW9uIHwgU2hvdWxkIC1CZSA nSU5TVEFMTEVEJwogICAgfQogICAgQWZ0ZXJBbGwgewogICAgICAgIGlmKFRlc3QtUGF0aCAkSW5zdGFsbFJvb3QpeyAmIChKb2luLVBhdGggJFJlbGVhc2VSb290ICdVbmluc3RhbGwtVW5pdmVyc2FsUmVzb3VyY2VIYXJ2ZXN0ZXIucHMxJykgLUluc3RhbGxSb290ICRJbnN0YWxsUm9vdCAtTm9PcGVuRXhwbG9yZXIgfCBPdXQtTnVsbCB9CiAgICB9Cn0K'
+          [IO.File]::WriteAllBytes($path,[Convert]::FromBase64String($canonicalBase64))
           $patched=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($patched -ne $expectedPatched){throw "patched harness hash mismatch: $patched"}
+          if($patched -ne $expectedPatched){throw "canonical harness hash mismatch: $patched"}
           $tokens=$null;$errors=$null
           [Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors) | Out-Null
           if($errors.Count){throw ($errors | Out-String)}
-          [ordered]@{decision='PASS';original_sha256=$actual;intermediate_sha256=$intermediate;patched_sha256=$patched;parse_errors=$errors.Count} | ConvertTo-Json | Set-Content harness-patch-receipt.json
+          [ordered]@{decision='PASS_CANONICAL_PESTER_HARNESS_INSTALLED';original_sha256=$actual;patched_sha256=$patched;parse_errors=$errors.Count} | ConvertTo-Json | Set-Content harness-patch-receipt.json
       - name: Acquire and verify Node 22.16.0 Windows x64
         shell: pwsh
         run: |
