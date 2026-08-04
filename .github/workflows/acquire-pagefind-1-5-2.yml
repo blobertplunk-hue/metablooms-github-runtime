@@ -1,0 +1,73 @@
+name: Acquire exact Pagefind 1.5.2
+
+on:
+  push:
+    branches:
+      - usrh-pagefind-1-5-2-acquire-20260804
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acquire:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Download and verify exact wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          wheel='pagefind_bin-1.5.2-py3-none-manylinux_2_12_x86_64.manylinux2010_x86_64.musllinux_1_1_x86_64.whl'
+          url='https://files.pythonhosted.org/packages/40/cf/2a7608bd67242c3b7a2d3fc0ff238d9183287a63b1e6838ff26b351b4d2a/'"$wheel"
+          expected='92eb3f492fc7dbf0fc68c18c78f8de44ecfb266ba64cb982e3ccc1b4bbd7203e'
+          curl --fail --location --retry 5 --retry-all-errors --output "artifact/$wheel" "$url"
+          printf '%s  %s\n' "$expected" "artifact/$wheel" | sha256sum --check --strict
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, zipfile
+          root = pathlib.Path('artifact')
+          wheel = root / 'pagefind_bin-1.5.2-py3-none-manylinux_2_12_x86_64.manylinux2010_x86_64.musllinux_1_1_x86_64.whl'
+          expected = '92eb3f492fc7dbf0fc68c18c78f8de44ecfb266ba64cb982e3ccc1b4bbd7203e'
+          def digest(path):
+              h = hashlib.sha256()
+              with path.open('rb') as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+          actual = digest(wheel)
+          if actual != expected:
+              raise SystemExit(f'wheel hash mismatch: {actual}')
+          with zipfile.ZipFile(wheel) as zf:
+              data = zf.read('pagefind_bin/pagefind')
+          binary = root / 'pagefind'
+          binary.write_bytes(data)
+          os.chmod(binary, 0o755)
+          binary_sha = digest(binary)
+          receipt = {
+              'schema': 'usrh.pagefind.github_acquisition.v1',
+              'decision': 'PASS_EXACT_PAGEFIND_1_5_2_ACQUIRED_HASHED_AND_EXTRACTED',
+              'version': '1.5.2',
+              'wheelName': wheel.name,
+              'wheelSha256': actual,
+              'expectedWheelSha256': expected,
+              'member': 'pagefind_bin/pagefind',
+              'binarySha256': binary_sha,
+              'sourceUrl': 'https://files.pythonhosted.org/packages/40/cf/2a7608bd67242c3b7a2d3fc0ff238d9183287a63b1e6838ff26b351b4d2a/' + wheel.name,
+              'workflowRepository': os.environ.get('GITHUB_REPOSITORY'),
+              'workflowRunId': os.environ.get('GITHUB_RUN_ID'),
+              'workflowSha': os.environ.get('GITHUB_SHA'),
+          }
+          (root / 'PAGEFIND_1_5_2_ACQUIRED.json').write_text(json.dumps(receipt, indent=2, sort_keys=True) + '\n')
+          (root / 'SHA256SUMS').write_text(f'{actual}  {wheel.name}\n{binary_sha}  pagefind\n')
+          PY
+          artifact/pagefind --version | tee artifact/PAGEFIND_VERSION.txt
+
+      - name: Upload verified dependency artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pagefind-1.5.2-linux-x64-exact
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
