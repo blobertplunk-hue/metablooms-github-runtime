@@ -44,7 +44,8 @@ jobs:
           $ErrorActionPreference='Stop'
           $path='source/tests/windows/cold-machine.Tests.ps1'
           $expectedOriginal='cf53fcb7a863007b3874cb8e7bb1d640036fd57c4abc815ab6886cea5b1f1310'
-          $expectedPatched='4061c39a21f1b3951a96e53492ce213424e87ef6530d07aaaa31b91801b5588a'
+          $expectedIntermediate='4061c39a21f1b3951a96e53492ce213424e87ef6530d07aaaa31b91801b5588a'
+          $expectedPatched='c3991a24f79ab7752dcbbc96ac3d3b604d3355ef07b36de4ae9c29803eeed52c'
           $actual=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
           if($actual -ne $expectedOriginal){throw "unexpected original harness hash: $actual"}
           $text=[IO.File]::ReadAllText($path)
@@ -69,12 +70,28 @@ jobs:
           if(-not $text.Contains($needle)){throw 'Describe block not found'}
           $text=$text.Replace($needle,$replacement)
           [IO.File]::WriteAllText($path,$text,[Text.UTF8Encoding]::new($false))
+          $intermediate=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($intermediate -ne $expectedIntermediate){throw "intermediate harness hash mismatch: $intermediate"}
+          $text=[IO.File]::ReadAllText($path)
+          $oldHost=(
+            '        $host=Join-Path $InstallRoot ''payload/bin/usrh-native-host.exe''',
+            '        $psi=[Diagnostics.ProcessStartInfo]::new($host)',
+            ''
+          ) -join "`n"
+          $newHost=(
+            '        $hostPath=Join-Path $InstallRoot ''payload/bin/usrh-native-host.exe''',
+            '        $psi=[Diagnostics.ProcessStartInfo]::new($hostPath)',
+            ''
+          ) -join "`n"
+          if(-not $text.Contains($oldHost)){throw 'reserved Host variable assignment not found'}
+          $text=$text.Replace($oldHost,$newHost)
+          [IO.File]::WriteAllText($path,$text,[Text.UTF8Encoding]::new($false))
           $patched=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
           if($patched -ne $expectedPatched){throw "patched harness hash mismatch: $patched"}
           $tokens=$null;$errors=$null
           [Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors) | Out-Null
           if($errors.Count){throw ($errors | Out-String)}
-          [ordered]@{decision='PASS';original_sha256=$actual;patched_sha256=$patched;parse_errors=$errors.Count} | ConvertTo-Json | Set-Content harness-patch-receipt.json
+          [ordered]@{decision='PASS';original_sha256=$actual;intermediate_sha256=$intermediate;patched_sha256=$patched;parse_errors=$errors.Count} | ConvertTo-Json | Set-Content harness-patch-receipt.json
       - name: Acquire and verify Node 22.16.0 Windows x64
         shell: pwsh
         run: |
