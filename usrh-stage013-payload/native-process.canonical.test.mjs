@@ -4,9 +4,11 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { encodeFrame, readFrame } from '../src/native-framing.mjs';
 
 const main = new URL('../src/native-main.mjs', import.meta.url);
+const mainPath = fileURLToPath(main);
 
 const startPayload = token => ({
   protocolVersion: '1.0', jobId: 'process-job', sequence: 1, type: 'job.start', capabilityToken: token,
@@ -19,7 +21,7 @@ const startPayload = token => ({
 
 test('native process emits ready token, accepts one frame, and closes cleanly on EOF', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'usrh-native-process-'));
-  const child = spawn(process.execPath, [main.pathname], {stdio: ['pipe','pipe','pipe'], env: {...process.env, USRH_DB_PATH: path.join(dir, 'jobs.sqlite')}});
+  const child = spawn(process.execPath, [mainPath], {stdio: ['pipe','pipe','pipe'], env: {...process.env, USRH_DB_PATH: path.join(dir, 'jobs.sqlite')}});
   try {
     const ready = await readFrame(child.stdout);
     assert.equal(ready.type, 'host.ready');
@@ -37,7 +39,7 @@ test('native process emits ready token, accepts one frame, and closes cleanly on
 
 test('malformed JSON receives structured rejection and does not terminate the host', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'usrh-native-process-'));
-  const child = spawn(process.execPath, [main.pathname], {stdio: ['pipe','pipe','pipe'], env: {...process.env, USRH_DB_PATH: path.join(dir, 'jobs.sqlite')}});
+  const child = spawn(process.execPath, [mainPath], {stdio: ['pipe','pipe','pipe'], env: {...process.env, USRH_DB_PATH: path.join(dir, 'jobs.sqlite')}});
   try {
     const ready = await readFrame(child.stdout);
     const bad = Buffer.from('{bad', 'utf8');
@@ -57,7 +59,7 @@ test('malformed JSON receives structured rejection and does not terminate the ho
 
 test('oversized length fails closed after one structured host error', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'usrh-native-process-'));
-  const child = spawn(process.execPath, [main.pathname], {stdio: ['pipe','pipe','pipe'], env: {...process.env, USRH_DB_PATH: path.join(dir, 'jobs.sqlite')}});
+  const child = spawn(process.execPath, [mainPath], {stdio: ['pipe','pipe','pipe'], env: {...process.env, USRH_DB_PATH: path.join(dir, 'jobs.sqlite')}});
   try {
     await readFrame(child.stdout);
     const header = Buffer.alloc(4); header.writeUInt32LE(1024 * 1024 + 1);
@@ -73,7 +75,7 @@ test('oversized length fails closed after one structured host error', async () =
 
 test('each native-host process emits a distinct capability token', async () => {
   const dirs = [0,1].map(() => fs.mkdtempSync(path.join(os.tmpdir(), 'usrh-native-token-')));
-  const children = dirs.map((dir, i) => spawn(process.execPath, [main.pathname], {stdio: ['pipe','pipe','pipe'], env: {...process.env, USRH_DB_PATH: path.join(dir, `jobs-${i}.sqlite`)}}));
+  const children = dirs.map((dir, i) => spawn(process.execPath, [mainPath], {stdio: ['pipe','pipe','pipe'], env: {...process.env, USRH_DB_PATH: path.join(dir, `jobs-${i}.sqlite`)}}));
   try {
     const ready = await Promise.all(children.map(child => readFrame(child.stdout)));
     assert.notEqual(ready[0].payload.capabilityToken, ready[1].payload.capabilityToken);
@@ -89,5 +91,6 @@ test('direct execution detection uses a platform-correct file URL', () => {
   const source = fs.readFileSync(main, 'utf8');
   assert.match(source, /import \{ pathToFileURL \} from 'node:url';/);
   assert.match(source, /pathToFileURL\(process\.argv\[1\]\)\.href/);
+  assert.equal(mainPath, fileURLToPath(main));
   assert.doesNotMatch(source, /`file:\/\/\$\{process\.argv\[1\]\}`/);
 });
