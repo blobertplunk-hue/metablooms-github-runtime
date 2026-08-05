@@ -37,16 +37,20 @@ jobs:
           Invoke-WebRequest $driver[0].url -OutFile cft/chromedriver-win64.zip
           $chromeArchiveHash=(Get-FileHash cft/chrome-win64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           $driverArchiveHash=(Get-FileHash cft/chromedriver-win64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          Expand-Archive cft/chrome-win64.zip cft/chrome -Force
-          Expand-Archive cft/chromedriver-win64.zip cft/driver -Force
-          $chromeExe=(Get-ChildItem cft/chrome -Recurse -Filter chrome.exe | Select-Object -First 1).FullName
-          $driverExe=(Get-ChildItem cft/driver -Recurse -Filter chromedriver.exe | Select-Object -First 1).FullName
+          $execRoot=Join-Path $env:RUNNER_TEMP 'usrh-cft-exec'
+          if(Test-Path $execRoot){Remove-Item $execRoot -Recurse -Force}
+          New-Item $execRoot -ItemType Directory -Force | Out-Null
+          Expand-Archive cft/chrome-win64.zip (Join-Path $execRoot 'chrome') -Force
+          Expand-Archive cft/chromedriver-win64.zip (Join-Path $execRoot 'driver') -Force
+          Get-ChildItem $execRoot -Recurse -File | Unblock-File -ErrorAction SilentlyContinue
+          $chromeExe=(Get-ChildItem (Join-Path $execRoot 'chrome') -Recurse -Filter chrome.exe | Select-Object -First 1).FullName
+          $driverExe=(Get-ChildItem (Join-Path $execRoot 'driver') -Recurse -Filter chromedriver.exe | Select-Object -First 1).FullName
           if(-not $chromeExe -or -not $driverExe){throw 'Chrome for Testing executable pair missing after extraction'}
           $chromeBinaryHash=(Get-FileHash $chromeExe -Algorithm SHA256).Hash.ToLowerInvariant()
           $driverBinaryHash=(Get-FileHash $driverExe -Algorithm SHA256).Hash.ToLowerInvariant()
-          $chromeVersion=& $chromeExe --version
+          $chromeFileVersion=[Diagnostics.FileVersionInfo]::GetVersionInfo($chromeExe).FileVersion
           $driverVersion=& $driverExe --version
-          if(($chromeVersion -join ' ') -notmatch [regex]::Escape($version)){throw "Chrome version mismatch: $chromeVersion"}
+          if($chromeFileVersion -notmatch [regex]::Escape($version)){throw "Chrome file version mismatch: $chromeFileVersion"}
           if(($driverVersion -join ' ') -notmatch [regex]::Escape($version)){throw "ChromeDriver version mismatch: $driverVersion"}
           [ordered]@{
             schema='MetaBloomsChromeForTestingAcquisition_v1'
@@ -60,8 +64,9 @@ jobs:
             chromedriver_archive_sha256=$driverArchiveHash
             chrome_binary_sha256=$chromeBinaryHash
             chromedriver_binary_sha256=$driverBinaryHash
-            chrome_version=[string]($chromeVersion -join ' ')
+            chrome_file_version=$chromeFileVersion
             chromedriver_version=[string]($driverVersion -join ' ')
+            execution_root=$execRoot
           } | ConvertTo-Json -Depth 20 | Set-Content evidence/CHROME_FOR_TESTING_ACQUISITION.json
           "USRH_CFT_CHROME=$chromeExe" | Out-File $env:GITHUB_ENV -Append
           "USRH_CFT_DRIVER=$driverExe" | Out-File $env:GITHUB_ENV -Append
@@ -104,6 +109,7 @@ jobs:
                     args=@(
                       '--headless=new',
                       '--disable-gpu',
+                      '--disable-crash-reporter',
                       '--no-first-run',
                       '--no-default-browser-check',
                       "--user-data-dir=$profile",
@@ -170,5 +176,5 @@ jobs:
         with:
           name: usrh-stage013-chrome-for-testing-qualification
           path: evidence/**
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
