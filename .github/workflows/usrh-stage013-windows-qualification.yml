@@ -45,18 +45,47 @@ jobs:
           $path='source/tests/windows/cold-machine.Tests.ps1'
           $canonical='usrh-stage013-payload/cold-machine.canonical.Tests.ps1'
           $expectedOriginal='cf53fcb7a863007b3874cb8e7bb1d640036fd57c4abc815ab6886cea5b1f1310'
+          $expectedCheckout='ec87758cebeac767a711b20c3f08742b7a869ad240a731d5f602828cec399b72'
           $expectedPatched='4bcc0a4ada905e12c249f63a1379ff877efcb6f10934e09a166e87dc8222a4b5'
           $actual=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
           if($actual -ne $expectedOriginal){throw "unexpected original harness hash: $actual"}
-          $canonicalHash=(Get-FileHash $canonical -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($canonicalHash -ne $expectedPatched){throw "canonical provider file hash mismatch: $canonicalHash"}
-          Copy-Item $canonical $path -Force
+          $checkoutHash=(Get-FileHash $canonical -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($checkoutHash -ne $expectedCheckout){throw "canonical checkout hash mismatch: $checkoutHash"}
+          $canonicalText=[IO.File]::ReadAllText($canonical).Replace("`r`n","`n")
+          [IO.File]::WriteAllText($path,$canonicalText,[Text.UTF8Encoding]::new($false))
           $patched=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
           if($patched -ne $expectedPatched){throw "installed harness hash mismatch: $patched"}
           $tokens=$null;$errors=$null
           [Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors) | Out-Null
           if($errors.Count){throw ($errors | Out-String)}
-          [ordered]@{decision='PASS_CANONICAL_PESTER_HARNESS_INSTALLED';original_sha256=$actual;provider_sha256=$canonicalHash;patched_sha256=$patched;parse_errors=$errors.Count} | ConvertTo-Json | Set-Content harness-patch-receipt.json
+          [ordered]@{decision='PASS_CANONICAL_PESTER_HARNESS_INSTALLED';original_sha256=$actual;checkout_sha256=$checkoutHash;normalized_sha256=$patched;patched_sha256=$patched;parse_errors=$errors.Count} | ConvertTo-Json | Set-Content harness-patch-receipt.json
+      - name: Install hash-bound Windows native-host source fix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $mainPath='source/apps/native-host/src/native-main.mjs'
+          $testPath='source/apps/native-host/test/native-process.test.mjs'
+          $mainCanonical='usrh-stage013-payload/native-main.canonical.mjs'
+          $testCanonical='usrh-stage013-payload/native-process.canonical.test.mjs'
+          $expectedMainOriginal='333d807f7427cd32f5588b0a9c64b47d8f67ba9f3378d337cd627b7dd20b5839'
+          $expectedTestOriginal='9e22bbb3e507e65d63f11f17f463e0e03311eddbc0be46e6297ac4a64f9c165b'
+          $expectedMainPatched='e6015db96c4b9c297a78088354b16323fd4c6736acdc1ec374d40a8a1cbc1dbc'
+          $expectedTestPatched='ba80c880365952396168b5fa3571aa6c227e032ee4cf0c0c98e3194b523fab4c'
+          $mainOriginal=(Get-FileHash $mainPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $testOriginal=(Get-FileHash $testPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($mainOriginal -ne $expectedMainOriginal){throw "unexpected native-main original hash: $mainOriginal"}
+          if($testOriginal -ne $expectedTestOriginal){throw "unexpected native-process test original hash: $testOriginal"}
+          $mainProvider=(Get-FileHash $mainCanonical -Algorithm SHA256).Hash.ToLowerInvariant()
+          $testProvider=(Get-FileHash $testCanonical -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($mainProvider -ne $expectedMainPatched){throw "native-main provider hash mismatch: $mainProvider"}
+          if($testProvider -ne $expectedTestPatched){throw "native-process test provider hash mismatch: $testProvider"}
+          Copy-Item $mainCanonical $mainPath -Force
+          Copy-Item $testCanonical $testPath -Force
+          $mainPatched=(Get-FileHash $mainPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $testPatched=(Get-FileHash $testPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($mainPatched -ne $expectedMainPatched){throw "native-main installed hash mismatch: $mainPatched"}
+          if($testPatched -ne $expectedTestPatched){throw "native-process test installed hash mismatch: $testPatched"}
+          [ordered]@{decision='PASS_WINDOWS_NATIVE_HOST_SOURCE_FIX_INSTALLED';main_original_sha256=$mainOriginal;main_patched_sha256=$mainPatched;test_original_sha256=$testOriginal;test_patched_sha256=$testPatched} | ConvertTo-Json | Set-Content native-host-source-fix-receipt.json
       - name: Acquire and verify Node 22.16.0 Windows x64
         shell: pwsh
         run: |
@@ -73,6 +102,13 @@ jobs:
           Expand-Archive deps/node.zip deps/node-expanded -Force
           Copy-Item deps/node-expanded/node-v22.16.0-win-x64/node.exe deps/node.exe
           (Get-FileHash deps/node.exe -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content deps/node.exe.sha256
+      - name: Run exact-Node native-host entrypoint regression
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference='Stop'
+          & deps/node.exe --test source/apps/native-host/test/native-process.test.mjs | Tee-Object native-process-test-output.txt
+          if($LASTEXITCODE -ne 0){throw "native-process regression failed: $LASTEXITCODE"}
       - name: Acquire and verify Pagefind 1.5.2 Windows x64
         shell: pwsh
         run: |
