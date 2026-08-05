@@ -22,6 +22,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
+          New-Item evidence -ItemType Directory -Force | Out-Null
           $releaseZip='prior/dist/UniversalResourceHarvester-0.0.13.zip'
           $expectedZip='1d0ac32dc0da7a8f18ab100b06620fad076232387126c4885773f0772c11b286'
           $actualZip=(Get-FileHash $releaseZip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -62,8 +63,12 @@ jobs:
               Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:9515/session/$sessionId/url" -ContentType 'application/json' -Body (@{url=$popup} | ConvertTo-Json) | Out-Null
               Start-Sleep -Milliseconds 500
               $current=(Invoke-RestMethod -Uri "http://127.0.0.1:9515/session/$sessionId/url").value
-              $source=(Invoke-RestMethod -Uri "http://127.0.0.1:9515/session/$sessionId/source").value
-              $title=(Invoke-RestMethod -Uri "http://127.0.0.1:9515/session/$sessionId/title").value
+              $source=[string](Invoke-RestMethod -Uri "http://127.0.0.1:9515/session/$sessionId/source").value
+              $title=[string](Invoke-RestMethod -Uri "http://127.0.0.1:9515/session/$sessionId/title").value
+              $targets=Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:9515/session/$sessionId/goog/cdp/execute" -ContentType 'application/json' -Body (@{cmd='Target.getTargets';params=@{}} | ConvertTo-Json -Depth 10)
+              [ordered]@{popup_url=$popup;current_url=$current;title=$title;source_length=$source.Length;release_zip_sha256=$actualZip;extension_id=$manifest.extensionId} | ConvertTo-Json -Depth 10 | Set-Content evidence/chrome-navigation.json
+              $source | Set-Content evidence/chrome-popup-source.html
+              $targets | ConvertTo-Json -Depth 30 | Set-Content evidence/chrome-targets.json
               if($current -ne $popup){throw "popup URL mismatch: $current"}
               if($title -ne 'Resource Harvester'){throw "popup title mismatch: $title"}
               if($source -notmatch '<h1>Resource Harvester</h1>'){throw 'popup heading absent from WebDriver page source'}
@@ -76,14 +81,12 @@ jobs:
                 extension_id=$manifest.extensionId
                 popup_url=$current
                 popup_title=$title
-                page_source_sha256=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes([string]$source))).ToLowerInvariant()
+                page_source_sha256=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($source))).ToLowerInvariant()
                 live_site_requests=0
                 credentials_used=0
                 student_data_used=0
               }
-              New-Item evidence -ItemType Directory -Force | Out-Null
               $receipt | ConvertTo-Json -Depth 20 | Set-Content evidence/STAGE013_CHROMEDRIVER_QUALIFICATION.json
-              $source | Set-Content evidence/chrome-popup-source.html
             } finally {
               try { Invoke-RestMethod -Method Delete -Uri "http://127.0.0.1:9515/session/$sessionId" | Out-Null } catch {}
             }
