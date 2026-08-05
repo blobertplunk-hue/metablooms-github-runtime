@@ -2,3 +2,5 @@
 *.zip filter=lfs diff=lfs merge=lfs -text
 *.tar.gz filter=lfs diff=lfs merge=lfs -text
 usrh-stage013-payload/cold-machine.canonical.Tests.ps1 text eol=lf
+usrh-stage013-payload/native-main.canonical.mjs text eol=lf
+usrh-stage013-payload/native-process.canonical.test.mjs text eol=lf
