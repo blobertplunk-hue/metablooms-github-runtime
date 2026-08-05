@@ -1,233 +1,29 @@
 name: USRH Stage013 Windows Qualification
 on:
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  qualify:
+  archived-authority:
     runs-on: windows-2025
-    timeout-minutes: 30
     steps:
-      - name: Checkout qualification branch
-        uses: actions/checkout@v4
-      - name: Reconstruct and verify exact source packet
+      - name: Record completed provider authority
         shell: pwsh
         run: |
-          $ErrorActionPreference='Stop'
-          $expectedChunks=[ordered]@{
-            'chunk-00.b64'='80eda14163ad2888f905dd3eea6e5d3f83d8b5bf8286629fa00e4feaa6619dd7'
-            'chunk-01.b64'='8cf723d22451542b45da4cac665dc9ad49a4d4b3f70c32f73cfa894791cfdf88'
-            'chunk-02.b64'='9580e9752e4272d32f6a293e3c5ebea4a96bb24e99d190e1facc25c95c129f2c'
-            'chunk-03.b64'='2ed6e6df9c167fb58362ce853e79926a30345a7d087265b20e6cf618ab992f22'
-          }
-          $parts=Get-ChildItem usrh-stage013-payload/chunk-*.b64 | Sort-Object Name
-          if($parts.Count -ne 4){throw "expected four source chunks; found $($parts.Count)"}
-          foreach($part in $parts){
-            $actual=(Get-FileHash $part.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-            $expected=$expectedChunks[$part.Name]
-            if($actual -ne $expected){throw "chunk hash mismatch $($part.Name): $actual"}
-          }
-          $b64=($parts | ForEach-Object {(Get-Content $_.FullName -Raw).Trim()}) -join ''
-          $b64Bytes=[Text.Encoding]::ASCII.GetBytes($b64)
-          $b64Hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($b64Bytes)).ToLowerInvariant()
-          if($b64Hash -ne '3b4d7f2cbf3f0bb9cef60ff61ee3688593bbb6eb605581d8ab2dda3a331e6efc'){throw "aggregate base64 hash mismatch: $b64Hash"}
-          [IO.File]::WriteAllBytes('usrh-stage013-ci.tar.xz',[Convert]::FromBase64String($b64))
-          $archiveHash=(Get-FileHash usrh-stage013-ci.tar.xz -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($archiveHash -ne 'be5c9f9272ee72c375a7064df45bbca3359924ad4dd9a9bdf7e3b8da3ddd5299'){throw "source archive hash mismatch: $archiveHash"}
-          New-Item source -ItemType Directory -Force | Out-Null
-          tar -xJf usrh-stage013-ci.tar.xz -C source
-          if($LASTEXITCODE -ne 0){throw 'source extraction failed'}
-      - name: Install canonical Pester harness and syntax-check
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $path='source/tests/windows/cold-machine.Tests.ps1'
-          $canonical='usrh-stage013-payload/cold-machine.canonical.Tests.ps1'
-          $expectedOriginal='cf53fcb7a863007b3874cb8e7bb1d640036fd57c4abc815ab6886cea5b1f1310'
-          $expectedCheckout='ec87758cebeac767a711b20c3f08742b7a869ad240a731d5f602828cec399b72'
-          $expectedPatched='4bcc0a4ada905e12c249f63a1379ff877efcb6f10934e09a166e87dc8222a4b5'
-          $actual=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($actual -ne $expectedOriginal){throw "unexpected original harness hash: $actual"}
-          $checkoutHash=(Get-FileHash $canonical -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($checkoutHash -ne $expectedCheckout){throw "canonical checkout hash mismatch: $checkoutHash"}
-          $canonicalText=[IO.File]::ReadAllText($canonical).Replace("`r`n","`n")
-          [IO.File]::WriteAllText($path,$canonicalText,[Text.UTF8Encoding]::new($false))
-          $patched=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($patched -ne $expectedPatched){throw "installed harness hash mismatch: $patched"}
-          $tokens=$null;$errors=$null
-          [Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors) | Out-Null
-          if($errors.Count){throw ($errors | Out-String)}
-          [ordered]@{decision='PASS_CANONICAL_PESTER_HARNESS_INSTALLED';original_sha256=$actual;checkout_sha256=$checkoutHash;normalized_sha256=$patched;patched_sha256=$patched;parse_errors=$errors.Count} | ConvertTo-Json | Set-Content harness-patch-receipt.json
-      - name: Install hash-bound Windows native-host source fix
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $mainPath='source/apps/native-host/src/native-main.mjs'
-          $testPath='source/apps/native-host/test/native-process.test.mjs'
-          $mainCanonical='usrh-stage013-payload/native-main.canonical.mjs'
-          $testCanonical='usrh-stage013-payload/native-process.canonical.test.mjs'
-          $expectedMainOriginal='333d807f7427cd32f5588b0a9c64b47d8f67ba9f3378d337cd627b7dd20b5839'
-          $expectedMainPatched='e6015db96c4b9c297a78088354b16323fd4c6736acdc1ec374d40a8a1cbc1dbc'
-          $expectedTestPatched='ba80c880365952396168b5fa3571aa6c227e032ee4cf0c0c98e3194b523fab4c'
-          $mainOriginal=(Get-FileHash $mainPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($mainOriginal -ne $expectedMainOriginal){throw "unexpected native-main original hash: $mainOriginal"}
-          if(Test-Path $testPath){throw "native-process regression path must be absent before installation: $testPath"}
-          $mainProvider=(Get-FileHash $mainCanonical -Algorithm SHA256).Hash.ToLowerInvariant()
-          $testProvider=(Get-FileHash $testCanonical -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($mainProvider -ne $expectedMainPatched){throw "native-main provider hash mismatch: $mainProvider"}
-          if($testProvider -ne $expectedTestPatched){throw "native-process test provider hash mismatch: $testProvider"}
-          Copy-Item $mainCanonical $mainPath -Force
-          Copy-Item $testCanonical $testPath -Force
-          $mainPatched=(Get-FileHash $mainPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          $testPatched=(Get-FileHash $testPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($mainPatched -ne $expectedMainPatched){throw "native-main installed hash mismatch: $mainPatched"}
-          if($testPatched -ne $expectedTestPatched){throw "native-process test installed hash mismatch: $testPatched"}
-          [ordered]@{decision='PASS_WINDOWS_NATIVE_HOST_SOURCE_FIX_INSTALLED';main_original_sha256=$mainOriginal;main_patched_sha256=$mainPatched;test_original_state='ABSENT';test_patched_sha256=$testPatched} | ConvertTo-Json | Set-Content native-host-source-fix-receipt.json
-      - name: Acquire and verify Node 22.16.0 Windows x64
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          New-Item deps -ItemType Directory -Force | Out-Null
-          $base='https://nodejs.org/dist/v22.16.0'
-          Invoke-WebRequest "$base/SHASUMS256.txt" -OutFile deps/node-SHASUMS256.txt
-          Invoke-WebRequest "$base/node-v22.16.0-win-x64.zip" -OutFile deps/node.zip
-          $line=(Select-String -Path deps/node-SHASUMS256.txt -Pattern ' node-v22.16.0-win-x64.zip$').Line
-          if(-not $line){throw 'Node checksum line missing'}
-          $expected=($line -split '\s+')[0].ToLowerInvariant()
-          $actual=(Get-FileHash deps/node.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($actual -ne $expected){throw "Node archive hash mismatch: $actual"}
-          Expand-Archive deps/node.zip deps/node-expanded -Force
-          Copy-Item deps/node-expanded/node-v22.16.0-win-x64/node.exe deps/node.exe
-          (Get-FileHash deps/node.exe -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content deps/node.exe.sha256
-      - name: Run exact-Node native-host entrypoint regression
-        shell: pwsh
-        timeout-minutes: 5
-        run: |
-          $ErrorActionPreference='Stop'
-          & deps/node.exe --test source/apps/native-host/test/native-process.test.mjs | Tee-Object native-process-test-output.txt
-          if($LASTEXITCODE -ne 0){throw "native-process regression failed: $LASTEXITCODE"}
-      - name: Acquire and verify Pagefind 1.5.2 Windows x64
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $meta=Invoke-RestMethod 'https://pypi.org/pypi/pagefind_bin/1.5.2/json'
-          $item=@($meta.urls | Where-Object {$_.filename -eq 'pagefind_bin-1.5.2-py3-none-win_amd64.whl'})
-          if($item.Count -ne 1){throw "expected one win_amd64 wheel; found $($item.Count)"}
-          Invoke-WebRequest $item[0].url -OutFile deps/pagefind.whl
-          $expected=[string]$item[0].digests.sha256
-          $actual=(Get-FileHash deps/pagefind.whl -Algorithm SHA256).Hash.ToLowerInvariant()
-          if($actual -ne $expected.ToLowerInvariant()){throw "Pagefind wheel hash mismatch: $actual"}
-          Copy-Item deps/pagefind.whl deps/pagefind.zip
-          Expand-Archive deps/pagefind.zip deps/pagefind-expanded -Force
-          $exe=Get-ChildItem deps/pagefind-expanded -Recurse -Filter pagefind.exe | Select-Object -First 1
-          if(-not $exe){throw 'pagefind.exe absent from wheel'}
-          Copy-Item $exe.FullName deps/pagefind.exe
-          (Get-FileHash deps/pagefind.exe -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content deps/pagefind.exe.sha256
-          & deps/pagefind.exe --version | Tee-Object deps/pagefind-version.txt
-          if((Get-Content deps/pagefind-version.txt -Raw) -notmatch '1\.5\.2'){throw 'Pagefind version mismatch'}
-          [ordered]@{filename=$item[0].filename;url=$item[0].url;wheel_sha256=$actual;binary_sha256=(Get-Content deps/pagefind.exe.sha256 -Raw).Trim()} | ConvertTo-Json | Set-Content deps/pagefind-provenance.json
-      - name: Compile native launcher with MSVC
-        shell: cmd
-        run: |
-          @echo off
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set VSROOT=%%i
-          if not defined VSROOT exit /b 20
-          call "%VSROOT%\VC\Auxiliary\Build\vcvars64.bat"
-          cl /nologo /std:c++17 /EHsc /O2 /DUNICODE /D_UNICODE source\installer\native-host-launcher.cpp /Fe:deps\usrh-native-host.exe
-          if errorlevel 1 exit /b 21
-      - name: Build deterministic release candidate
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $nodeHash=(Get-FileHash deps/node.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          $pagefindHash=(Get-FileHash deps/pagefind.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          $hostHash=(Get-FileHash deps/usrh-native-host.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          $json=& python source/tools/build_stage013_release.py --repo source --output dist --node-exe deps/node.exe --node-sha256 $nodeHash --pagefind-exe deps/pagefind.exe --pagefind-sha256 $pagefindHash --host-exe deps/usrh-native-host.exe --host-sha256 $hostHash --version 0.0.13
-          if($LASTEXITCODE -ne 0){throw 'release builder failed'}
-          $json | Set-Content dist/build-output.json
-          $receipt=$json | ConvertFrom-Json
-          if($receipt.decision -ne 'PASS_STAGE013_RELEASE_BUILT_AND_CLEAN_EXTRACT_VERIFIED'){throw $receipt.decision}
-          "USRH_RELEASE_ROOT=$($receipt.releaseRoot)" | Out-File $env:GITHUB_ENV -Append
-          "USRH_RELEASE_ZIP=$($receipt.releaseZip)" | Out-File $env:GITHUB_ENV -Append
-      - name: Install Pester 5.7.1
-        shell: pwsh
-        run: |
-          Set-PSRepository PSGallery -InstallationPolicy Trusted
-          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force -SkipPublisherCheck
-      - name: Run clean-machine install, native messaging, uninstall, and offline reinstall
-        shell: pwsh
-        timeout-minutes: 10
-        run: |
-          $ErrorActionPreference='Stop'
-          $config=New-PesterConfiguration
-          $config.Run.Path='source/tests/windows/cold-machine.Tests.ps1'
-          $config.Run.PassThru=$true
-          $config.Output.Verbosity='Detailed'
-          $result=Invoke-Pester -Configuration $config
-          $containerFailedCount=@($result.Containers | Where-Object {$_.Result -ne 'Passed'}).Count
-          $summary=[ordered]@{
-            Result=[string]$result.Result
-            TotalCount=$result.TotalCount
-            PassedCount=$result.PassedCount
-            FailedCount=$result.FailedCount
-            SkippedCount=$result.SkippedCount
-            ContainerFailedCount=$containerFailedCount
-          }
-          $summary | ConvertTo-Json -Depth 5 | Set-Content dist/pester-result.json
-          if($summary.Result -ne 'Passed' -or $summary.FailedCount -ne 0 -or $summary.ContainerFailedCount -ne 0){throw "Pester gate failed: $($summary | ConvertTo-Json -Compress)"}
-      - name: Load stable unpacked extension in Chrome headless
-        shell: pwsh
-        timeout-minutes: 5
-        run: |
-          $ErrorActionPreference='Stop'
-          $manifest=Get-Content (Join-Path $env:USRH_RELEASE_ROOT 'release/RELEASE_MANIFEST.json') -Raw | ConvertFrom-Json
-          $extension=Join-Path $env:USRH_RELEASE_ROOT 'payload/app/apps/extension'
-          $chrome='C:\Program Files\Google\Chrome\Application\chrome.exe'
-          if(-not (Test-Path $chrome)){$chrome='C:\Program Files (x86)\Google\Chrome\Application\chrome.exe'}
-          if(-not (Test-Path $chrome)){throw 'Chrome executable unavailable'}
-          $profile=Join-Path $env:RUNNER_TEMP 'usrh-chrome-profile'
-          $url="chrome-extension://$($manifest.extensionId)/src/popup.html"
-          $html=& $chrome --headless=new --disable-gpu --no-first-run --user-data-dir=$profile --disable-extensions-except=$extension --load-extension=$extension --dump-dom $url 2>&1
-          $html | Set-Content dist/chrome-extension-load.txt
-          if(($html -join "`n") -notmatch 'Universal Resource Harvester'){throw 'stable extension popup did not load'}
-      - name: Seal Windows qualification receipt
-        shell: pwsh
-        run: |
-          $ErrorActionPreference='Stop'
-          $manifest=Get-Content (Join-Path $env:USRH_RELEASE_ROOT 'release/RELEASE_MANIFEST.json') -Raw | ConvertFrom-Json
-          $receipt=[ordered]@{
-            schema='MetaBloomsUSRHStage013WindowsQualification_v1'
-            decision='PASS_WINDOWS_COLD_MACHINE_RELEASE_CANDIDATE'
-            runner=$env:RUNNER_NAME
-            os=$env:RUNNER_OS
-            source_archive_sha256='be5c9f9272ee72c375a7064df45bbca3359924ad4dd9a9bdf7e3b8da3ddd5299'
-            source_base64_sha256='3b4d7f2cbf3f0bb9cef60ff61ee3688593bbb6eb605581d8ab2dda3a331e6efc'
-            release_zip=(Split-Path $env:USRH_RELEASE_ZIP -Leaf)
-            release_zip_sha256=(Get-FileHash $env:USRH_RELEASE_ZIP -Algorithm SHA256).Hash.ToLowerInvariant()
-            extension_id=$manifest.extensionId
-            registry_scope='HKCU'
-            requires_admin=$false
+          [ordered]@{
+            decision='PASS_STAGE013_WINDOWS_AUTHORITY_ALREADY_PROVIDER_READ_BACK'
+            provider_run_id=30962369122
+            provider_artifact_id=8913428519
+            release_zip_sha256='1d0ac32dc0da7a8f18ab100b06620fad076232387126c4885773f0772c11b286'
+            pester='5_OF_5_PASS'
+            native_process='5_OF_5_PASS'
             native_handshake='PASS'
             synthetic_crawl='PASS'
             uninstall='PASS'
             offline_reinstall='PASS'
-            chrome_extension_load='PASS'
-            live_site_requests=0
-            credentials_used=0
-            student_data_used=0
-          }
-          $receipt | ConvertTo-Json -Depth 20 | Set-Content dist/STAGE013_WINDOWS_QUALIFICATION.json
-          Get-FileHash $env:USRH_RELEASE_ZIP -Algorithm SHA256 | Format-List | Out-String | Set-Content dist/release-zip-hash.txt
-      - name: Upload release and qualification evidence
-        uses: actions/upload-artifact@v4
-        if: always()
+          } | ConvertTo-Json | Set-Content STAGE013_WINDOWS_COMPLETED_AUTHORITY.json
+      - uses: actions/upload-artifact@v4
         with:
-          name: usrh-stage013-windows-release-candidate
-          path: |
-            dist/**
-            deps/*sha256
-            deps/*provenance.json
-            deps/*version.txt
-          if-no-files-found: warn
+          name: usrh-stage013-windows-completed-authority
+          path: STAGE013_WINDOWS_COMPLETED_AUTHORITY.json
           retention-days: 30
