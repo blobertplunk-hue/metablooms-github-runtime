@@ -68,13 +68,11 @@ jobs:
           $mainCanonical='usrh-stage013-payload/native-main.canonical.mjs'
           $testCanonical='usrh-stage013-payload/native-process.canonical.test.mjs'
           $expectedMainOriginal='333d807f7427cd32f5588b0a9c64b47d8f67ba9f3378d337cd627b7dd20b5839'
-          $expectedTestOriginal='9e22bbb3e507e65d63f11f17f463e0e03311eddbc0be46e6297ac4a64f9c165b'
           $expectedMainPatched='e6015db96c4b9c297a78088354b16323fd4c6736acdc1ec374d40a8a1cbc1dbc'
           $expectedTestPatched='ba80c880365952396168b5fa3571aa6c227e032ee4cf0c0c98e3194b523fab4c'
           $mainOriginal=(Get-FileHash $mainPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          $testOriginal=(Get-FileHash $testPath -Algorithm SHA256).Hash.ToLowerInvariant()
           if($mainOriginal -ne $expectedMainOriginal){throw "unexpected native-main original hash: $mainOriginal"}
-          if($testOriginal -ne $expectedTestOriginal){throw "unexpected native-process test original hash: $testOriginal"}
+          if(Test-Path $testPath){throw "native-process regression path must be absent before installation: $testPath"}
           $mainProvider=(Get-FileHash $mainCanonical -Algorithm SHA256).Hash.ToLowerInvariant()
           $testProvider=(Get-FileHash $testCanonical -Algorithm SHA256).Hash.ToLowerInvariant()
           if($mainProvider -ne $expectedMainPatched){throw "native-main provider hash mismatch: $mainProvider"}
@@ -85,7 +83,7 @@ jobs:
           $testPatched=(Get-FileHash $testPath -Algorithm SHA256).Hash.ToLowerInvariant()
           if($mainPatched -ne $expectedMainPatched){throw "native-main installed hash mismatch: $mainPatched"}
           if($testPatched -ne $expectedTestPatched){throw "native-process test installed hash mismatch: $testPatched"}
-          [ordered]@{decision='PASS_WINDOWS_NATIVE_HOST_SOURCE_FIX_INSTALLED';main_original_sha256=$mainOriginal;main_patched_sha256=$mainPatched;test_original_sha256=$testOriginal;test_patched_sha256=$testPatched} | ConvertTo-Json | Set-Content native-host-source-fix-receipt.json
+          [ordered]@{decision='PASS_WINDOWS_NATIVE_HOST_SOURCE_FIX_INSTALLED';main_original_sha256=$mainOriginal;main_patched_sha256=$mainPatched;test_original_state='ABSENT';test_patched_sha256=$testPatched} | ConvertTo-Json | Set-Content native-host-source-fix-receipt.json
       - name: Acquire and verify Node 22.16.0 Windows x64
         shell: pwsh
         run: |
