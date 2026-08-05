@@ -1,0 +1,101 @@
+name: USRH Stage013 ChromeDriver Validation
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  validate-extension:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Download exact run-21 release evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: usrh-stage013-windows-release-candidate
+          path: prior
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: blobertplunk-hue/metablooms-github-runtime
+          run-id: 30962369122
+      - name: Verify release identity and load unpacked extension with ChromeDriver
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $releaseZip='prior/dist/UniversalResourceHarvester-0.0.13.zip'
+          $expectedZip='1d0ac32dc0da7a8f18ab100b06620fad076232387126c4885773f0772c11b286'
+          $actualZip=(Get-FileHash $releaseZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actualZip -ne $expectedZip){throw "release ZIP hash mismatch: $actualZip"}
+          $releaseRoot='prior/dist/UniversalResourceHarvester-0.0.13'
+          $manifest=Get-Content "$releaseRoot/release/RELEASE_MANIFEST.json" -Raw | ConvertFrom-Json
+          if($manifest.extensionId -ne 'nnmfljkkhpfdjdkgkakhijobdnkkinjl'){throw "extension ID mismatch: $($manifest.extensionId)"}
+          $extension=[IO.Path]::GetFullPath("$releaseRoot/payload/app/apps/extension")
+          $driver=(Get-Command chromedriver.exe -ErrorAction Stop).Source
+          $driverLog=Join-Path $env:RUNNER_TEMP 'chromedriver.log'
+          $process=Start-Process -FilePath $driver -ArgumentList @('--port=9515',"--log-path=$driverLog",'--verbose') -PassThru -WindowStyle Hidden
+          try {
+            $ready=$false
+            for($i=0;$i -lt 40;$i++){
+              try {
+                $status=Invoke-RestMethod -Uri 'http://127.0.0.1:9515/status' -TimeoutSec 2
+                if($status.value.ready){$ready=$true;break}
+              } catch {}
+              Start-Sleep -Milliseconds 250
+            }
+            if(-not $ready){throw 'ChromeDriver did not become ready'}
+            $profile=Join-Path $env:RUNNER_TEMP 'usrh-webdriver-profile'
+            $capabilities=[ordered]@{
+              capabilities=[ordered]@{
+                alwaysMatch=[ordered]@{
+                  browserName='chrome'
+                  'goog:chromeOptions'=[ordered]@{
+                    args=@('--headless=new','--disable-gpu','--no-first-run',"--user-data-dir=$profile","--disable-extensions-except=$extension","--load-extension=$extension")
+                  }
+                }
+              }
+            }
+            $session=Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:9515/session' -ContentType 'application/json' -Body ($capabilities | ConvertTo-Json -Depth 20)
+            $sessionId=[string]$session.value.sessionId
+            if(-not $sessionId){throw 'ChromeDriver returned no session ID'}
+            try {
+              $popup="chrome-extension://$($manifest.extensionId)/src/popup.html"
+              Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:9515/session/$sessionId/url" -ContentType 'application/json' -Body (@{url=$popup} | ConvertTo-Json) | Out-Null
+              Start-Sleep -Milliseconds 500
+              $current=(Invoke-RestMethod -Uri "http://127.0.0.1:9515/session/$sessionId/url").value
+              $source=(Invoke-RestMethod -Uri "http://127.0.0.1:9515/session/$sessionId/source").value
+              $title=(Invoke-RestMethod -Uri "http://127.0.0.1:9515/session/$sessionId/title").value
+              if($current -ne $popup){throw "popup URL mismatch: $current"}
+              if($title -ne 'Resource Harvester'){throw "popup title mismatch: $title"}
+              if($source -notmatch '<h1>Resource Harvester</h1>'){throw 'popup heading absent from WebDriver page source'}
+              if($source -notmatch 'authorization-confirmed'){throw 'authorization control absent from popup source'}
+              $receipt=[ordered]@{
+                schema='MetaBloomsUSRHStage013ChromeDriverQualification_v1'
+                decision='PASS_CHROMEDRIVER_UNPACKED_EXTENSION_FIXED_ID_POPUP'
+                source_run_id=30962369122
+                release_zip_sha256=$actualZip
+                extension_id=$manifest.extensionId
+                popup_url=$current
+                popup_title=$title
+                page_source_sha256=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes([string]$source))).ToLowerInvariant()
+                live_site_requests=0
+                credentials_used=0
+                student_data_used=0
+              }
+              New-Item evidence -ItemType Directory -Force | Out-Null
+              $receipt | ConvertTo-Json -Depth 20 | Set-Content evidence/STAGE013_CHROMEDRIVER_QUALIFICATION.json
+              $source | Set-Content evidence/chrome-popup-source.html
+            } finally {
+              try { Invoke-RestMethod -Method Delete -Uri "http://127.0.0.1:9515/session/$sessionId" | Out-Null } catch {}
+            }
+          } finally {
+            if($process -and -not $process.HasExited){$process.Kill($true)}
+            if(Test-Path $driverLog){Copy-Item $driverLog evidence/chromedriver.log -Force -ErrorAction SilentlyContinue}
+          }
+      - name: Upload ChromeDriver qualification evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: usrh-stage013-chromedriver-qualification
+          path: evidence/**
+          if-no-files-found: warn
+          retention-days: 30
