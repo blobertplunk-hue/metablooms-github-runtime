@@ -1,0 +1,174 @@
+name: USRH Stage013 Chrome for Testing Validation
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  validate-extension:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Download exact run-21 release evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: usrh-stage013-windows-release-candidate
+          path: prior
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: blobertplunk-hue/metablooms-github-runtime
+          run-id: 30962369122
+
+      - name: Acquire exact Chrome for Testing browser and driver
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item cft,evidence -ItemType Directory -Force | Out-Null
+          $catalogUrl='https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json'
+          Invoke-WebRequest $catalogUrl -OutFile cft/known-good-versions-with-downloads.json
+          $catalog=Get-Content cft/known-good-versions-with-downloads.json -Raw | ConvertFrom-Json -Depth 100
+          $version='150.0.7871.124'
+          $entry=@($catalog.versions | Where-Object {$_.version -eq $version})
+          if($entry.Count -ne 1){throw "exact Chrome for Testing version unavailable: $version"}
+          $chrome=@($entry[0].downloads.chrome | Where-Object {$_.platform -eq 'win64'})
+          $driver=@($entry[0].downloads.chromedriver | Where-Object {$_.platform -eq 'win64'})
+          if($chrome.Count -ne 1 -or $driver.Count -ne 1){throw "exact win64 browser/driver pair unavailable for $version"}
+          Invoke-WebRequest $chrome[0].url -OutFile cft/chrome-win64.zip
+          Invoke-WebRequest $driver[0].url -OutFile cft/chromedriver-win64.zip
+          $chromeArchiveHash=(Get-FileHash cft/chrome-win64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $driverArchiveHash=(Get-FileHash cft/chromedriver-win64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          Expand-Archive cft/chrome-win64.zip cft/chrome -Force
+          Expand-Archive cft/chromedriver-win64.zip cft/driver -Force
+          $chromeExe=(Get-ChildItem cft/chrome -Recurse -Filter chrome.exe | Select-Object -First 1).FullName
+          $driverExe=(Get-ChildItem cft/driver -Recurse -Filter chromedriver.exe | Select-Object -First 1).FullName
+          if(-not $chromeExe -or -not $driverExe){throw 'Chrome for Testing executable pair missing after extraction'}
+          $chromeBinaryHash=(Get-FileHash $chromeExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $driverBinaryHash=(Get-FileHash $driverExe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $chromeVersion=& $chromeExe --version
+          $driverVersion=& $driverExe --version
+          if(($chromeVersion -join ' ') -notmatch [regex]::Escape($version)){throw "Chrome version mismatch: $chromeVersion"}
+          if(($driverVersion -join ' ') -notmatch [regex]::Escape($version)){throw "ChromeDriver version mismatch: $driverVersion"}
+          [ordered]@{
+            schema='MetaBloomsChromeForTestingAcquisition_v1'
+            decision='PASS_EXACT_CHROME_FOR_TESTING_PAIR_ACQUIRED'
+            catalog_url=$catalogUrl
+            catalog_sha256=(Get-FileHash cft/known-good-versions-with-downloads.json -Algorithm SHA256).Hash.ToLowerInvariant()
+            version=$version
+            chrome_url=$chrome[0].url
+            chromedriver_url=$driver[0].url
+            chrome_archive_sha256=$chromeArchiveHash
+            chromedriver_archive_sha256=$driverArchiveHash
+            chrome_binary_sha256=$chromeBinaryHash
+            chromedriver_binary_sha256=$driverBinaryHash
+            chrome_version=[string]($chromeVersion -join ' ')
+            chromedriver_version=[string]($driverVersion -join ' ')
+          } | ConvertTo-Json -Depth 20 | Set-Content evidence/CHROME_FOR_TESTING_ACQUISITION.json
+          "USRH_CFT_CHROME=$chromeExe" | Out-File $env:GITHUB_ENV -Append
+          "USRH_CFT_DRIVER=$driverExe" | Out-File $env:GITHUB_ENV -Append
+          "USRH_CFT_VERSION=$version" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Verify release and load fixed-ID unpacked extension
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference='Stop'
+          $releaseZip='prior/dist/UniversalResourceHarvester-0.0.13.zip'
+          $expectedZip='1d0ac32dc0da7a8f18ab100b06620fad076232387126c4885773f0772c11b286'
+          $actualZip=(Get-FileHash $releaseZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actualZip -ne $expectedZip){throw "release ZIP hash mismatch: $actualZip"}
+          $releaseRoot='prior/dist/UniversalResourceHarvester-0.0.13'
+          $manifest=Get-Content "$releaseRoot/release/RELEASE_MANIFEST.json" -Raw | ConvertFrom-Json
+          $expectedExtensionId='nnmfljkkhpfdjdkgkakhijobdnkkinjl'
+          if($manifest.extensionId -ne $expectedExtensionId){throw "extension ID mismatch: $($manifest.extensionId)"}
+          $extension=[IO.Path]::GetFullPath("$releaseRoot/payload/app/apps/extension")
+          $driverLog=Join-Path $env:RUNNER_TEMP 'cft-chromedriver.log'
+          $process=Start-Process -FilePath $env:USRH_CFT_DRIVER -ArgumentList @('--port=9515',"--log-path=$driverLog",'--verbose') -PassThru -WindowStyle Hidden
+          $sessionId=$null
+          try {
+            $ready=$false
+            for($i=0;$i -lt 60;$i++){
+              try {
+                $status=Invoke-RestMethod -Uri 'http://127.0.0.1:9515/status' -TimeoutSec 2
+                if($status.value.ready){$ready=$true;break}
+              } catch {}
+              Start-Sleep -Milliseconds 250
+            }
+            if(-not $ready){throw 'ChromeDriver did not become ready'}
+            $profile=Join-Path $env:RUNNER_TEMP 'usrh-cft-profile'
+            $capabilities=[ordered]@{
+              capabilities=[ordered]@{
+                alwaysMatch=[ordered]@{
+                  browserName='chrome'
+                  'goog:chromeOptions'=[ordered]@{
+                    binary=$env:USRH_CFT_CHROME
+                    args=@(
+                      '--headless=new',
+                      '--disable-gpu',
+                      '--no-first-run',
+                      '--no-default-browser-check',
+                      "--user-data-dir=$profile",
+                      "--disable-extensions-except=$extension",
+                      "--load-extension=$extension"
+                    )
+                  }
+                }
+              }
+            }
+            $session=Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:9515/session' -ContentType 'application/json' -Body ($capabilities | ConvertTo-Json -Depth 20)
+            $sessionId=[string]$session.value.sessionId
+            if(-not $sessionId){throw 'ChromeDriver returned no session ID'}
+            $popup="chrome-extension://$expectedExtensionId/src/popup.html"
+            Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:9515/session/$sessionId/url" -ContentType 'application/json' -Body (@{url=$popup} | ConvertTo-Json) | Out-Null
+            $loaded=$false
+            $current=$null
+            $source=''
+            $title=''
+            for($i=0;$i -lt 40;$i++){
+              Start-Sleep -Milliseconds 250
+              $current=[string](Invoke-RestMethod -Uri "http://127.0.0.1:9515/session/$sessionId/url").value
+              $source=[string](Invoke-RestMethod -Uri "http://127.0.0.1:9515/session/$sessionId/source").value
+              $title=[string](Invoke-RestMethod -Uri "http://127.0.0.1:9515/session/$sessionId/title").value
+              if($current -eq $popup -and $title -eq 'Resource Harvester' -and $source -match '<h1>Resource Harvester</h1>' -and $source -match 'authorization-confirmed'){$loaded=$true;break}
+            }
+            $targets=Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:9515/session/$sessionId/goog/cdp/execute" -ContentType 'application/json' -Body (@{cmd='Target.getTargets';params=@{}} | ConvertTo-Json -Depth 10)
+            [ordered]@{
+              popup_url=$popup
+              current_url=$current
+              popup_title=$title
+              page_source_length=$source.Length
+              release_zip_sha256=$actualZip
+              extension_id=$manifest.extensionId
+              chrome_for_testing_version=$env:USRH_CFT_VERSION
+              loaded=$loaded
+            } | ConvertTo-Json -Depth 20 | Set-Content evidence/CFT_NAVIGATION.json
+            $source | Set-Content evidence/cft-popup-source.html
+            $targets | ConvertTo-Json -Depth 30 | Set-Content evidence/cft-targets.json
+            if(-not $loaded){throw "Chrome for Testing did not load fixed-ID popup; current=$current title=$title sourceLength=$($source.Length)"}
+            [ordered]@{
+              schema='MetaBloomsUSRHStage013ChromeForTestingQualification_v1'
+              decision='PASS_CHROME_FOR_TESTING_UNPACKED_EXTENSION_FIXED_ID_POPUP'
+              source_run_id=30962369122
+              release_zip_sha256=$actualZip
+              extension_id=$manifest.extensionId
+              popup_url=$current
+              popup_title=$title
+              page_source_sha256=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($source))).ToLowerInvariant()
+              chrome_for_testing_version=$env:USRH_CFT_VERSION
+              live_site_requests=0
+              credentials_used=0
+              student_data_used=0
+            } | ConvertTo-Json -Depth 20 | Set-Content evidence/STAGE013_CHROME_FOR_TESTING_QUALIFICATION.json
+          } finally {
+            if($sessionId){try { Invoke-RestMethod -Method Delete -Uri "http://127.0.0.1:9515/session/$sessionId" | Out-Null } catch {}}
+            if($process -and -not $process.HasExited){$process.Kill($true)}
+            if(Test-Path $driverLog){Copy-Item $driverLog evidence/cft-chromedriver.log -Force -ErrorAction SilentlyContinue}
+          }
+
+      - name: Upload Chrome for Testing qualification evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: usrh-stage013-chrome-for-testing-qualification
+          path: evidence/**
+          if-no-files-found: error
+          retention-days: 30
