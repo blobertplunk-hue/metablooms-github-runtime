@@ -1,0 +1,74 @@
+name: Student Data Hub rc5 CMD Hash Diagnostic
+
+on:
+  push:
+    branches:
+      - student-data-hub-pdf-ci-20260808
+    paths:
+      - ".github/workflows/student-data-hub-rc5-cmd-hash-debug.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  hash-diagnostic:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install exact PowerShell 7.6.3 shim
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip=Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.3-win-x64.zip'
+          $fakeProgramFiles=Join-Path $env:RUNNER_TEMP 'ProgramFilesShim'
+          $dir=Join-Path $fakeProgramFiles 'PowerShell\7'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.3/PowerShell-7.6.3-win-x64.zip' -OutFile $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath $dir -Force
+          "FAKE_PROGRAMFILES=$fakeProgramFiles" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Run exact CMD wrong-hash path and capture verbatim output
+        id: probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:GITHUB_WORKSPACE 'ci\student-data-hub-rc5-cmd'
+          $cmd=Join-Path $dir 'RUN_LAKELAND_RC5_ALL.cmd'
+          $expectedCmd='3f335f334f411fe93893e19cd68b3c281b3697247f4705afb1bd98f150d4396b'
+          $actualCmd=(Get-FileHash -LiteralPath $cmd -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actualCmd -ne $expectedCmd){throw "CMD hash mismatch $actualCmd"}
+          $payload=Join-Path $dir 'Lakeland_Offline_Student_Data_Hub_v4.0.0-rc5-instrumented.zip'
+          [IO.File]::WriteAllBytes($payload,[byte[]](1,2,3,4,5,6,7,8))
+          $harness=Join-Path $env:RUNNER_TEMP 'invoke-exact-runner.cmd'
+          "@echo off`r`ncall `"$cmd`" <nul`r`nexit /b %errorlevel%`r`n" | Set-Content -LiteralPath $harness -Encoding ascii -NoNewline
+          $old=$env:ProgramFiles
+          try {
+            $env:ProgramFiles=$env:FAKE_PROGRAMFILES
+            $out=& cmd.exe /d /s /c $harness 2>&1 | Out-String
+            $rc=$LASTEXITCODE
+          } finally { $env:ProgramFiles=$old; Remove-Item -LiteralPath $payload -Force -ErrorAction SilentlyContinue }
+          Write-Host '--- BEGIN EXACT CMD OUTPUT ---'
+          Write-Host $out
+          Write-Host '--- END EXACT CMD OUTPUT ---'
+          Write-Host "EXIT=$rc"
+          $out | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'HASH_DIAGNOSTIC.txt') -Encoding utf8
+          if($rc -ne 1){throw "Expected exit 1 got $rc"}
+          if($out -match 'Running the instrumented recipient self-test'){throw 'Self-test was reached after wrong hash.'}
+          exit 0
+      - name: Upload diagnostic
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: lakeland-rc5-cmd-hash-diagnostic
+          path: ${{ runner.temp }}/HASH_DIAGNOSTIC.txt
+          if-no-files-found: error
+          retention-days: 7
+      - name: Publish locator
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: |
+          gh pr comment 3 --repo "${{ github.repository }}" --body "STUDENT_DATA_HUB_RC5_CMD_HASH_DIAGNOSTIC`nrun_id=${{ github.run_id }}`nartifact_id=$env:ARTIFACT_ID`nhead_sha=${{ github.sha }}`njob_status=${{ job.status }}"
