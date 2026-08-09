@@ -1,0 +1,59 @@
+name: Student Data Hub PSScriptAnalyzer Capture
+
+on:
+  push:
+    branches:
+      - student-data-hub-pdf-ci-20260808
+    paths:
+      - ".github/workflows/student-data-hub-pssa-capture.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  capture-pssa:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Save exact PSScriptAnalyzer 1.25.0
+        id: capture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=Join-Path $env:RUNNER_TEMP 'pssa-artifact'
+          $modules=Join-Path $root 'modules'
+          New-Item -ItemType Directory -Force -Path $modules | Out-Null
+          Save-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Repository PSGallery -Path $modules -Force
+          $manifest=Get-ChildItem -LiteralPath $modules -Recurse -File -Filter 'PSScriptAnalyzer.psd1' | Select-Object -First 1
+          if(-not $manifest){throw 'PSScriptAnalyzer.psd1 not found after Save-Module.'}
+          Import-Module $manifest.FullName -Force
+          $loaded=Get-Module PSScriptAnalyzer
+          if($loaded.Version.ToString() -ne '1.25.0'){throw "Unexpected PSScriptAnalyzer version: $($loaded.Version)"}
+          $files=@(Get-ChildItem -LiteralPath (Split-Path -Parent $manifest.FullName) -Recurse -File | Sort-Object FullName | ForEach-Object {
+            [ordered]@{path=$_.FullName.Substring($root.Length+1).Replace('\\','/');sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant();bytes=$_.Length}
+          })
+          [ordered]@{schema='mb.lakeland.psscriptanalyzer_capture.v1';version='1.25.0';runner_os=$env:RUNNER_OS;image_os=$env:ImageOS;files=$files} | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $root 'PROVENANCE.json') -Encoding utf8
+      - name: Upload exact module artifact
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: psscriptanalyzer-1.25.0-exact
+          path: ${{ runner.temp }}/pssa-artifact
+          if-no-files-found: error
+          retention-days: 7
+      - name: Publish module locator
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: |
+          $body=@"
+          STUDENT_DATA_HUB_PSSA_CAPTURE
+          run_id=${{ github.run_id }}
+          artifact_id=$env:ARTIFACT_ID
+          head_sha=${{ github.sha }}
+          job_status=${{ job.status }}
+          "@
+          gh pr comment 3 --repo "${{ github.repository }}" --body $body
