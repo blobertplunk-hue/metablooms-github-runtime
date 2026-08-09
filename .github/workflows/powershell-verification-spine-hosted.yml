@@ -1,0 +1,217 @@
+name: PowerShell Verification Spine Hosted H2
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/powershell-verification-spine-hosted.yml'
+      - 'tools/metablooms/powershell_verification_spine/evidence_binding_v1.py'
+      - 'tools/metablooms/powershell_verification_spine/windows/hosted_plane_driver.ps1'
+      - 'task4_hosted_harness/POWER_SHELL_FAILURE_CORPUS_PILOT_001_FIXTURES.zip.b64'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hosted-h2:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact verifier commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Rehydrate exact frozen Pilot 001 artifact and contract
+        shell: pwsh
+        env:
+          EXPECTED_ARTIFACT_SHA256: 659589043fd670d438f93cc3f302eb50b41c7cb1cc972a5f428f0c580ac053ee
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $b64 = Get-Content -LiteralPath task4_hosted_harness/POWER_SHELL_FAILURE_CORPUS_PILOT_001_FIXTURES.zip.b64 -Raw
+          $bytes = [Convert]::FromBase64String($b64.Trim())
+          $artifact = Join-Path $env:RUNNER_TEMP 'pilot001-fixtures.zip'
+          [IO.File]::WriteAllBytes($artifact, $bytes)
+          $sha = (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -ne $env:EXPECTED_ARTIFACT_SHA256) { throw "artifact hash mismatch: $sha" }
+          $contract = Join-Path $env:RUNNER_TEMP 'pilot001-contract.json'
+          @'
+          {
+            "contract_id": "MB-PS-HOSTED-PILOT001-CORE-ONLY-v1",
+            "contract_generation": 4,
+            "entrypoints": ["START_MULTI_SOURCE_IMPORT.cmd"],
+            "install_method": "extract_zip_subdir",
+            "declared_os_matrix": ["windows-hosted-prequalification"],
+            "declared_powershell_matrix": ["PowerShell 7.6.3"],
+            "declared_external_dependencies": [],
+            "observable_success_oracles": ["entrypoint exits 0"],
+            "location_independence_claim": true
+          }
+          '@ | Set-Content -LiteralPath $contract -Encoding utf8NoBOM
+          $contractSha = (Get-FileHash -LiteralPath $contract -Algorithm SHA256).Hash.ToLowerInvariant()
+          "PILOT001_ARTIFACT=$artifact" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PILOT001_CONTRACT=$contract" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PILOT001_CONTRACT_SHA256=$contractSha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify hosted PowerShell toolchain
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $version = $PSVersionTable.PSVersion.ToString()
+          if ($version -ne '7.6.3') { throw "expected pwsh 7.6.3, observed $version" }
+          $desktop = & powershell.exe -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString() + "|" + $PSVersionTable.PSEdition'
+          if (-not ([string]$desktop).StartsWith('5.1|Desktop')) { throw "Windows PowerShell 5.1 unavailable: $desktop" }
+          $pester = Get-Module -ListAvailable Pester | Sort-Object Version -Descending | Select-Object -First 1
+          if ($null -eq $pester) { throw 'Pester unavailable on windows-2025 runner' }
+          Write-Host "pwsh=$version WindowsPowerShell=$desktop Pester=$($pester.Version)"
+
+      - name: Execute broken and repaired exact packaged entrypoints
+        shell: pwsh
+        env:
+          EXPECTED_ARTIFACT_SHA256: 659589043fd670d438f93cc3f302eb50b41c7cb1cc972a5f428f0c580ac053ee
+          VERIFIER_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $evidenceRoot = Join-Path $env:RUNNER_TEMP 'metablooms-hosted-h2'
+          New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
+          & ./tools/metablooms/powershell_verification_spine/windows/hosted_plane_driver.ps1 `
+            -ArtifactPath $env:PILOT001_ARTIFACT `
+            -ContractPath $env:PILOT001_CONTRACT `
+            -ExpectedArtifactSha256 $env:EXPECTED_ARTIFACT_SHA256 `
+            -ExpectedContractSha256 $env:PILOT001_CONTRACT_SHA256 `
+            -ExpectedVerifierCommit $env:VERIFIER_COMMIT `
+            -OutputDir (Join-Path $evidenceRoot 'broken') `
+            -PackageSubdir 'bad_package'
+          & ./tools/metablooms/powershell_verification_spine/windows/hosted_plane_driver.ps1 `
+            -ArtifactPath $env:PILOT001_ARTIFACT `
+            -ContractPath $env:PILOT001_CONTRACT `
+            -ExpectedArtifactSha256 $env:EXPECTED_ARTIFACT_SHA256 `
+            -ExpectedContractSha256 $env:PILOT001_CONTRACT_SHA256 `
+            -ExpectedVerifierCommit $env:VERIFIER_COMMIT `
+            -OutputDir (Join-Path $evidenceRoot 'fixed') `
+            -PackageSubdir 'fixed_package'
+          "HOSTED_EVIDENCE_ROOT=$evidenceRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Validate receipts against exact H0 identity
+        shell: pwsh
+        run: |
+          @'
+          import json, os
+          from pathlib import Path
+          from tools.metablooms.powershell_verification_spine.evidence_binding_v1 import validate_hosted_windows_evidence
+
+          root = Path(os.environ['HOSTED_EVIDENCE_ROOT'])
+          artifact = Path(os.environ['PILOT001_ARTIFACT'])
+          contract = Path(os.environ['PILOT001_CONTRACT'])
+          contract_data = json.loads(contract.read_text(encoding='utf-8-sig'))
+          subject = {
+              'schema': 'mb.powershell.release_subject.v1',
+              'artifact_sha256': os.environ['EXPECTED_ARTIFACT_SHA256'],
+              'contract_sha256': os.environ['PILOT001_CONTRACT_SHA256'],
+              'contract_generation': int(contract_data['contract_generation']),
+              'entrypoints': list(contract_data['entrypoints']),
+              'declared_os_matrix': list(contract_data['declared_os_matrix']),
+              'declared_powershell_matrix': list(contract_data['declared_powershell_matrix']),
+          }
+          broken = json.loads((root / 'broken' / 'hosted_plane_receipt.json').read_text(encoding='utf-8-sig'))
+          fixed = json.loads((root / 'fixed' / 'hosted_plane_receipt.json').read_text(encoding='utf-8-sig'))
+          broken_validation = validate_hosted_windows_evidence(subject, broken)
+          fixed_validation = validate_hosted_windows_evidence(subject, fixed)
+          if broken_validation.get('decision') != 'BLOCKED' or 'WRONG_POWERSHELL_RUNTIME_SELECTED' not in broken_validation.get('failure_classes', []):
+              raise SystemExit(f'broken Pilot001 did not block wrong runtime selection: {broken_validation}')
+          if fixed_validation != {'decision': 'PASS', 'failure_classes': []}:
+              raise SystemExit(f'fixed Pilot001 did not pass hosted H2 validation: {fixed_validation}')
+          verdict = {
+              'schema': 'mb.powershell.hosted_pilot001_verdict.v1',
+              'artifact_sha256': subject['artifact_sha256'],
+              'contract_sha256': subject['contract_sha256'],
+              'subject': subject,
+              'broken_validation': broken_validation,
+              'fixed_validation': fixed_validation,
+              'broken_receipt': broken,
+              'fixed_receipt': fixed,
+          }
+          (root / 'hosted_pilot001_verdict.json').write_text(json.dumps(verdict, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          '@ | python -
+
+      - name: Run Pester hosted behavioral assertions
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $testFile = Join-Path $env:RUNNER_TEMP 'Task4.Hosted.Tests.ps1'
+          @'
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          Describe 'MetaBlooms Task 4 hosted Windows Pilot 001 qualification' {
+            BeforeAll {
+              $script:Verdict = Get-Content -LiteralPath (Join-Path $env:HOSTED_EVIDENCE_ROOT 'hosted_pilot001_verdict.json') -Raw | ConvertFrom-Json
+            }
+            It 'runs on native Windows' { $script:Verdict.fixed_receipt.environment.native_windows | Should -BeTrue }
+            It 'blocks broken wrong selection' {
+              $script:Verdict.broken_validation.decision | Should -Be 'BLOCKED'
+              @($script:Verdict.broken_validation.failure_classes) | Should -Contain 'WRONG_POWERSHELL_RUNTIME_SELECTED'
+            }
+            It 'passes repaired launcher' { $script:Verdict.fixed_validation.decision | Should -Be 'PASS' }
+            It 'executes exact entrypoint under 7.6.3 Core' {
+              $matrix = @($script:Verdict.fixed_receipt.executions | Where-Object { $_.execution_kind -eq 'matrix_leg' })
+              $matrix.Count | Should -BeGreaterThan 0
+              $matrix[0].entrypoint | Should -Be 'START_MULTI_SOURCE_IMPORT.cmd'
+              $matrix[0].powershell_version | Should -Be '7.6.3'
+              $matrix[0].powershell_edition | Should -Be 'Core'
+              $matrix[0].exit_code | Should -Be 0
+            }
+          }
+          '@ | Set-Content -LiteralPath $testFile -Encoding utf8NoBOM
+          $result = Invoke-Pester -Path $testFile -PassThru -Output Detailed
+          if ($result.FailedCount -ne 0) { throw "Pester hosted assertions failed: $($result.FailedCount)" }
+          [ordered]@{
+            schema = 'mb.powershell.hosted_pester_summary.v1'
+            version = [string](Get-Module Pester).Version
+            total = [int]$result.TotalCount
+            passed = [int]$result.PassedCount
+            failed = [int]$result.FailedCount
+            skipped = [int]$result.SkippedCount
+          } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:HOSTED_EVIDENCE_ROOT 'pester_summary.json') -Encoding utf8NoBOM
+
+      - name: Write verifier and hosted evidence manifests
+        shell: pwsh
+        env:
+          VERIFIER_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $verifierFiles = @(
+            'tools/metablooms/powershell_verification_spine/evidence_binding_v1.py',
+            'tools/metablooms/powershell_verification_spine/windows/hosted_plane_driver.ps1',
+            '.github/workflows/powershell-verification-spine-hosted.yml'
+          )
+          $verifierRows = foreach ($path in $verifierFiles) {
+            [ordered]@{ path = $path; sha256 = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
+          }
+          [ordered]@{ schema='mb.powershell.hosted_verifier_sources.v1'; verifier_commit=$env:VERIFIER_COMMIT.ToLowerInvariant(); files=@($verifierRows) } |
+            ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $env:HOSTED_EVIDENCE_ROOT 'verifier_sources.json') -Encoding utf8NoBOM
+          $rows = Get-ChildItem -LiteralPath $env:HOSTED_EVIDENCE_ROOT -File -Recurse | Sort-Object FullName | ForEach-Object {
+            [ordered]@{
+              path = [IO.Path]::GetRelativePath($env:HOSTED_EVIDENCE_ROOT, $_.FullName).Replace('\','/')
+              sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              bytes = [int64]$_.Length
+            }
+          }
+          [ordered]@{
+            schema = 'mb.powershell.hosted_evidence_manifest.v1'
+            verifier_commit = $env:VERIFIER_COMMIT.ToLowerInvariant()
+            file_count = @($rows).Count
+            files = @($rows)
+          } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $env:HOSTED_EVIDENCE_ROOT 'HOSTED_EVIDENCE_MANIFEST.json') -Encoding utf8NoBOM
+
+      - name: Upload hash-bound hosted evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: powershell-verification-spine-task4-hosted-evidence
+          path: ${{ runner.temp }}/metablooms-hosted-h2
+          if-no-files-found: error
+          retention-days: 14
