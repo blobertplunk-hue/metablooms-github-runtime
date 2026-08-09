@@ -1,3 +1,4 @@
+# Trigger: PR synchronize for isolated Windows CI probe; no test-logic change.
 name: Student Data Hub PdfPig Windows Probe
 
 on:
