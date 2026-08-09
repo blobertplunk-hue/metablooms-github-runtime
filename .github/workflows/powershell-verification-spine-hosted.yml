@@ -88,7 +88,8 @@ jobs:
           $resolvedPwsh = (Get-Command pwsh.exe -ErrorAction Stop).Source
           if ([IO.Path]::GetFullPath($resolvedPwsh) -ne [IO.Path]::GetFullPath((Join-Path $env:PINNED_PWSH_DIR 'pwsh.exe'))) { throw "PATH did not select pinned PowerShell 7.6.3: $resolvedPwsh" }
           $desktop = & powershell.exe -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString() + "|" + $PSVersionTable.PSEdition'
-          if (-not ([string]$desktop).StartsWith('5.1|Desktop')) { throw "Windows PowerShell 5.1 unavailable: $desktop" }
+          $desktopParts = ([string]$desktop).Trim().Split('|', 2)
+          if ($desktopParts.Count -ne 2 -or -not $desktopParts[0].StartsWith('5.1') -or $desktopParts[1] -ne 'Desktop') { throw "Windows PowerShell 5.1 unavailable: $desktop" }
           $pester = Get-Module -ListAvailable Pester | Sort-Object Version -Descending | Select-Object -First 1
           if ($null -eq $pester) { throw 'Pester unavailable on windows-2025 runner' }
           Write-Host "runnerShell=$runnerShellVersion pinnedPwsh=$pinnedRaw WindowsPowerShell=$desktop Pester=$($pester.Version)"
