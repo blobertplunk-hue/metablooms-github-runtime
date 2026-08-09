@@ -50,13 +50,9 @@ jobs:
           $ErrorActionPreference='Stop'
           $cmd=Join-Path $env:GITHUB_WORKSPACE 'ci\student-data-hub-rc5-cmd\RUN_LAKELAND_RC5_ALL.cmd'
           $harness=Join-Path $env:RUNNER_TEMP 'invoke-exact-runner.cmd'
-          "@echo off`r`ncall `"$cmd`" <nul`r`nexit /b %errorlevel%`r`n" | Set-Content -LiteralPath $harness -Encoding ascii -NoNewline
-          $old=$env:ProgramFiles
-          try {
-            $env:ProgramFiles=$env:FAKE_PROGRAMFILES
-            $out = & cmd.exe /d /s /c $harness 2>&1 | Out-String
-            $rc=$LASTEXITCODE
-          } finally { $env:ProgramFiles=$old }
+          "@echo off`r`nset `"ProgramFiles=$env:FAKE_PROGRAMFILES`"`r`ncall `"$cmd`" <nul`r`nexit /b %errorlevel%`r`n" | Set-Content -LiteralPath $harness -Encoding ascii -NoNewline
+          $out = & cmd.exe /d /s /c $harness 2>&1 | Out-String
+          $rc=$LASTEXITCODE
           $out | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'MISSING_PAYLOAD_CONSOLE.txt') -Encoding utf8
           if($rc -ne 1){throw "Expected missing-payload exit 1, got $rc"}
           if($out -notmatch 'Payload ZIP is not beside this CMD file'){throw 'Expected missing-payload diagnostic not observed.'}
@@ -72,13 +68,11 @@ jobs:
           $payload=Join-Path $dir 'Lakeland_Offline_Student_Data_Hub_v4.0.0-rc5-instrumented.zip'
           [IO.File]::WriteAllBytes($payload,[byte[]](1,2,3,4,5,6,7,8))
           $harness=Join-Path $env:RUNNER_TEMP 'invoke-exact-runner.cmd'
-          "@echo off`r`ncall `"$cmd`" <nul`r`nexit /b %errorlevel%`r`n" | Set-Content -LiteralPath $harness -Encoding ascii -NoNewline
-          $old=$env:ProgramFiles
+          "@echo off`r`nset `"ProgramFiles=$env:FAKE_PROGRAMFILES`"`r`ncall `"$cmd`" <nul`r`nexit /b %errorlevel%`r`n" | Set-Content -LiteralPath $harness -Encoding ascii -NoNewline
           try {
-            $env:ProgramFiles=$env:FAKE_PROGRAMFILES
             $out = & cmd.exe /d /s /c $harness 2>&1 | Out-String
             $rc=$LASTEXITCODE
-          } finally { $env:ProgramFiles=$old; Remove-Item -LiteralPath $payload -Force -ErrorAction SilentlyContinue }
+          } finally { Remove-Item -LiteralPath $payload -Force -ErrorAction SilentlyContinue }
           $out | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'HASH_REJECTION_CONSOLE.txt') -Encoding utf8
           if($rc -ne 1){throw "Expected hash-rejection exit 1, got $rc"}
           if($out -notmatch 'Payload SHA-256 mismatch'){throw 'Expected payload SHA mismatch diagnostic not observed.'}
