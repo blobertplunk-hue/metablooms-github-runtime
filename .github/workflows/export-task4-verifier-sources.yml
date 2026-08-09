@@ -1,0 +1,49 @@
+name: Export Task 4 Verifier Sources
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/export-task4-verifier-sources.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-sources:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Copy exact Windows-checkout source bytes
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:RUNNER_TEMP 'task4-verifier-sources'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          Copy-Item -LiteralPath 'tools/metablooms/powershell_verification_spine/evidence_binding_v1.py' -Destination (Join-Path $out 'evidence_binding_v1.py')
+          Copy-Item -LiteralPath 'tools/metablooms/powershell_verification_spine/windows/hosted_plane_driver.ps1' -Destination (Join-Path $out 'hosted_plane_driver.ps1')
+          Copy-Item -LiteralPath '.github/workflows/powershell-verification-spine-hosted.yml' -Destination (Join-Path $out 'powershell-verification-spine-hosted.yml')
+          Copy-Item -LiteralPath 'task4_hosted_harness/POWER_SHELL_FAILURE_CORPUS_PILOT_001_FIXTURES.zip.b64' -Destination (Join-Path $out 'POWER_SHELL_FAILURE_CORPUS_PILOT_001_FIXTURES.zip.b64')
+          $rows = @(
+            'evidence_binding_v1.py',
+            'hosted_plane_driver.ps1',
+            'powershell-verification-spine-hosted.yml',
+            'POWER_SHELL_FAILURE_CORPUS_PILOT_001_FIXTURES.zip.b64'
+          ) | ForEach-Object {
+            "$((Get-FileHash -LiteralPath (Join-Path $out $_) -Algorithm SHA256).Hash.ToLowerInvariant())  $_"
+          }
+          [IO.File]::WriteAllLines((Join-Path $out 'SOURCE_SHA256SUMS.txt'), $rows, [Text.UTF8Encoding]::new($false))
+          (git rev-parse HEAD).Trim() | Set-Content -LiteralPath (Join-Path $out 'GIT_HEAD.txt') -Encoding utf8NoBOM
+      - name: Upload exact source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: task4-exact-verifier-sources
+          path: ${{ runner.temp }}/task4-verifier-sources
+          if-no-files-found: error
+          retention-days: 14
