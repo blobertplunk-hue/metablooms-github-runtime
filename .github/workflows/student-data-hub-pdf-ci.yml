@@ -106,6 +106,7 @@ jobs:
           & $pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File $wrapper -ProbePath "$env:GITHUB_WORKSPACE\ci\student-data-hub-pdf\PdfPigProbe.ps1" -PdfPigDll $dll -OutputDir $out -NegativeControl
           if ($LASTEXITCODE -ne 86) { throw "Negative-control probe failed to detect mutation as expected; exit=$LASTEXITCODE" }
           Write-Host 'NEGATIVE CONTROL ADEQUACY PASS expected_exit=86'
+          exit 0
 
       - name: Write provenance
         shell: pwsh
