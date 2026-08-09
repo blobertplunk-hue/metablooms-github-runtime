@@ -1,0 +1,40 @@
+name: Export Task 4 Verifier Sources
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/export-task4-verifier-sources.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-sources:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Copy exact tested source bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/task4-verifier-sources"
+          mkdir -p "$out/tools/metablooms/powershell_verification_spine/windows" "$out/.github/workflows" "$out/task4_hosted_harness"
+          cp tools/metablooms/powershell_verification_spine/evidence_binding_v1.py "$out/tools/metablooms/powershell_verification_spine/evidence_binding_v1.py"
+          cp tools/metablooms/powershell_verification_spine/windows/hosted_plane_driver.ps1 "$out/tools/metablooms/powershell_verification_spine/windows/hosted_plane_driver.ps1"
+          cp .github/workflows/powershell-verification-spine-hosted.yml "$out/.github/workflows/powershell-verification-spine-hosted.yml"
+          cp task4_hosted_harness/POWER_SHELL_FAILURE_CORPUS_PILOT_001_FIXTURES.zip.b64 "$out/task4_hosted_harness/POWER_SHELL_FAILURE_CORPUS_PILOT_001_FIXTURES.zip.b64"
+          (cd "$out" && sha256sum tools/metablooms/powershell_verification_spine/evidence_binding_v1.py tools/metablooms/powershell_verification_spine/windows/hosted_plane_driver.ps1 .github/workflows/powershell-verification-spine-hosted.yml task4_hosted_harness/POWER_SHELL_FAILURE_CORPUS_PILOT_001_FIXTURES.zip.b64 > SOURCE_SHA256SUMS.txt)
+          git rev-parse HEAD > "$out/GIT_HEAD.txt"
+      - name: Upload exact source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: task4-exact-verifier-sources
+          path: ${{ runner.temp }}/task4-verifier-sources
+          if-no-files-found: error
+          retention-days: 14
