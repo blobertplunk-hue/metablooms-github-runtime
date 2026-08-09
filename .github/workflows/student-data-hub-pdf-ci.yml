@@ -1,0 +1,112 @@
+name: Student Data Hub PdfPig Windows Probe
+
+on:
+  push:
+    branches:
+      - student-data-hub-pdf-ci-20260808
+    paths:
+      - ".github/workflows/student-data-hub-pdf-ci.yml"
+      - "ci/student-data-hub-pdf/**"
+
+permissions:
+  contents: read
+
+jobs:
+  pdfpig-windows-probe:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore exact PdfPig 0.1.15
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $restore = Join-Path $env:RUNNER_TEMP 'pdfpig-restore'
+          New-Item -ItemType Directory -Force -Path $restore | Out-Null
+          Push-Location $restore
+          dotnet new classlib --framework net8.0 --force
+          dotnet add package PdfPig --version 0.1.15
+          dotnet restore --packages "$env:RUNNER_TEMP\nuget"
+          Pop-Location
+          $dll = Get-ChildItem -Path "$env:RUNNER_TEMP\nuget\pdfpig\0.1.15" -Recurse -File -Filter 'UglyToad.PdfPig.dll' |
+            Where-Object { $_.FullName -match '[\\/]net8\.0[\\/]' } |
+            Select-Object -First 1
+          if (-not $dll) { throw 'PdfPig net8.0 assembly not found after exact restore.' }
+          $out = Join-Path $env:GITHUB_WORKSPACE 'ci\student-data-hub-pdf\artifact'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item -LiteralPath $dll.FullName -Destination (Join-Path $out 'UglyToad.PdfPig.dll')
+          dotnet --info | Set-Content -LiteralPath (Join-Path $out 'DOTNET_INFO.txt') -Encoding UTF8
+          Get-FileHash -LiteralPath (Join-Path $out 'UglyToad.PdfPig.dll') -Algorithm SHA256 |
+            Format-List * | Out-String |
+            Set-Content -LiteralPath (Join-Path $out 'PDFPIG_DLL_SHA256.txt') -Encoding UTF8
+
+      - name: Download exact PowerShell 7.6.3 portable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.3-win-x64.zip'
+          $dir = Join-Path $env:RUNNER_TEMP 'pwsh763'
+          Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.3/PowerShell-7.6.3-win-x64.zip' -OutFile $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath $dir -Force
+          $version = & (Join-Path $dir 'pwsh.exe') -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          if ($version.Trim() -ne '7.6.3') { throw "Unexpected PowerShell version: $version" }
+          "version=$version" | Set-Content -LiteralPath "$env:GITHUB_WORKSPACE\ci\student-data-hub-pdf\artifact\POWERSHELL_VERSION.txt" -Encoding UTF8
+
+      - name: Run positive probe on Windows PowerShell 7.6.3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pwsh = Join-Path $env:RUNNER_TEMP 'pwsh763\pwsh.exe'
+          $dll = "$env:GITHUB_WORKSPACE\ci\student-data-hub-pdf\artifact\UglyToad.PdfPig.dll"
+          $out = "$env:GITHUB_WORKSPACE\ci\student-data-hub-pdf\artifact\positive"
+          & $pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\ci\student-data-hub-pdf\PdfPigProbe.ps1" -PdfPigDll $dll -OutputDir $out
+          if ($LASTEXITCODE -ne 0) { throw "Positive probe failed exit=$LASTEXITCODE" }
+
+      - name: Run negative-control adequacy probe
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pwsh = Join-Path $env:RUNNER_TEMP 'pwsh763\pwsh.exe'
+          $dll = "$env:GITHUB_WORKSPACE\ci\student-data-hub-pdf\artifact\UglyToad.PdfPig.dll"
+          $out = "$env:GITHUB_WORKSPACE\ci\student-data-hub-pdf\artifact\negative"
+          & $pwsh -NoLogo -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\ci\student-data-hub-pdf\PdfPigProbe.ps1" -PdfPigDll $dll -OutputDir $out -NegativeControl
+          if ($LASTEXITCODE -ne 86) { throw "Negative-control probe failed to detect mutation as expected; exit=$LASTEXITCODE" }
+          Write-Host 'NEGATIVE CONTROL ADEQUACY PASS expected_exit=86'
+
+      - name: Write provenance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = "$env:GITHUB_WORKSPACE\ci\student-data-hub-pdf\artifact"
+          $dll = Join-Path $root 'UglyToad.PdfPig.dll'
+          $obj = [ordered]@{
+            schema = 'mb.lakeland.pdfpig.windows_ci_provenance.v1'
+            created_at_utc = [DateTime]::UtcNow.ToString('o')
+            runner_os = $env:RUNNER_OS
+            runner_arch = $env:RUNNER_ARCH
+            image_os = $env:ImageOS
+            package_id = 'PdfPig'
+            package_version = '0.1.15'
+            dll_sha256 = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToLowerInvariant()
+            powershell_version = '7.6.3'
+            workflow_run_id = $env:GITHUB_RUN_ID
+            workflow_run_attempt = $env:GITHUB_RUN_ATTEMPT
+            commit_sha = $env:GITHUB_SHA
+            branch = $env:GITHUB_REF_NAME
+          }
+          $obj | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $root 'PROVENANCE.json') -Encoding UTF8
+
+      - name: Upload exact probe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lakeland-pdfpig-windows-probe
+          path: ci/student-data-hub-pdf/artifact
+          if-no-files-found: error
+          retention-days: 7
