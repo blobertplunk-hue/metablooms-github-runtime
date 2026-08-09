@@ -1,0 +1,53 @@
+name: Student Data Hub PdfPig License Capture
+
+on:
+  push:
+    branches:
+      - student-data-hub-pdf-ci-20260808
+    paths:
+      - ".github/workflows/student-data-hub-pdf-license.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  capture-license:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - name: Capture exact tagged license
+        id: capture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $out=Join-Path $env:RUNNER_TEMP 'pdfpig-license'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $license=Join-Path $out 'LICENSE.txt'
+          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/UglyToad/PdfPig/v0.1.15/LICENSE' -OutFile $license
+          $sha=(Get-FileHash -LiteralPath $license -Algorithm SHA256).Hash.ToLowerInvariant()
+          $bytes=(Get-Item -LiteralPath $license).Length
+          [ordered]@{schema='mb.lakeland.pdfpig_license_provenance.v1';repository='UglyToad/PdfPig';tag='v0.1.15';path='LICENSE';sha256=$sha;bytes=$bytes}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $out 'LICENSE_PROVENANCE.json') -Encoding utf8
+      - name: Upload license artifact
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: lakeland-pdfpig-license-v0.1.15
+          path: ${{ runner.temp }}/pdfpig-license
+          if-no-files-found: error
+          retention-days: 7
+      - name: Publish license artifact locator
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: |
+          $body=@"
+          STUDENT_DATA_HUB_PDFPIG_LICENSE
+          run_id=${{ github.run_id }}
+          artifact_id=$env:ARTIFACT_ID
+          head_sha=${{ github.sha }}
+          job_status=${{ job.status }}
+          "@
+          gh pr comment 3 --repo "${{ github.repository }}" --body $body
