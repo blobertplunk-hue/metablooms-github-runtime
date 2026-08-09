@@ -61,6 +61,7 @@ jobs:
           if($rc -ne 1){throw "Expected missing-payload exit 1, got $rc"}
           if($out -notmatch 'Payload ZIP is not beside this CMD file'){throw 'Expected missing-payload diagnostic not observed.'}
           Write-Host 'PASS native CMD missing-payload path'
+          exit 0
 
       - name: Native cmd.exe payload-hash rejection path
         shell: pwsh
@@ -83,6 +84,7 @@ jobs:
           if($out -notmatch 'Payload SHA-256 mismatch'){throw 'Expected payload SHA mismatch diagnostic not observed.'}
           if($out -match 'Running the instrumented recipient self-test'){throw 'Runner proceeded past hash gate unexpectedly.'}
           Write-Host 'PASS native CMD hash-rejection path'
+          exit 0
 
       - name: Write native CMD probe result
         shell: pwsh
