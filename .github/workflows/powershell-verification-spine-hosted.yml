@@ -22,6 +22,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Rehydrate exact frozen Pilot 001 artifact and contract
         shell: pwsh
@@ -55,18 +56,42 @@ jobs:
           "PILOT001_CONTRACT=$contract" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "PILOT001_CONTRACT_SHA256=$contractSha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Provision exact PowerShell 7.6.3
+        shell: pwsh
+        env:
+          POWERSHELL_763_ZIP_SHA256: 07ddb0d00b660459560ef82a9841da7705b27cd5dcca5a0d7b025a98eca29eca
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $zip = Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.3-win-x64.zip'
+          $dir = Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.3-win-x64'
+          Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.3/PowerShell-7.6.3-win-x64.zip' -OutFile $zip
+          $sha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -ne $env:POWERSHELL_763_ZIP_SHA256) { throw "PowerShell 7.6.3 ZIP hash mismatch: $sha" }
+          Expand-Archive -LiteralPath $zip -DestinationPath $dir -Force
+          $pinned = Join-Path $dir 'pwsh.exe'
+          $version = & $pinned -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString() + "|" + $PSVersionTable.PSEdition'
+          if ([string]$version -ne '7.6.3|Core') { throw "pinned PowerShell runtime mismatch: $version" }
+          $dir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          "PINNED_PWSH_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PINNED_PWSH_ZIP_SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Pinned PowerShell 7.6.3 SHA256=$sha"
+
       - name: Verify hosted PowerShell toolchain
         shell: pwsh
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
-          $version = $PSVersionTable.PSVersion.ToString()
-          if ($version -ne '7.6.3') { throw "expected pwsh 7.6.3, observed $version" }
+          $runnerShellVersion = $PSVersionTable.PSVersion.ToString()
+          $pinnedRaw = & (Join-Path $env:PINNED_PWSH_DIR 'pwsh.exe') -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString() + "|" + $PSVersionTable.PSEdition'
+          if ([string]$pinnedRaw -ne '7.6.3|Core') { throw "expected pinned pwsh 7.6.3 Core, observed $pinnedRaw" }
+          $resolvedPwsh = (Get-Command pwsh.exe -ErrorAction Stop).Source
+          if ([IO.Path]::GetFullPath($resolvedPwsh) -ne [IO.Path]::GetFullPath((Join-Path $env:PINNED_PWSH_DIR 'pwsh.exe'))) { throw "PATH did not select pinned PowerShell 7.6.3: $resolvedPwsh" }
           $desktop = & powershell.exe -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString() + "|" + $PSVersionTable.PSEdition'
           if (-not ([string]$desktop).StartsWith('5.1|Desktop')) { throw "Windows PowerShell 5.1 unavailable: $desktop" }
           $pester = Get-Module -ListAvailable Pester | Sort-Object Version -Descending | Select-Object -First 1
           if ($null -eq $pester) { throw 'Pester unavailable on windows-2025 runner' }
-          Write-Host "pwsh=$version WindowsPowerShell=$desktop Pester=$($pester.Version)"
+          Write-Host "runnerShell=$runnerShellVersion pinnedPwsh=$pinnedRaw WindowsPowerShell=$desktop Pester=$($pester.Version)"
 
       - name: Execute broken and repaired exact packaged entrypoints
         shell: pwsh
@@ -98,6 +123,8 @@ jobs:
 
       - name: Validate receipts against exact H0 identity
         shell: pwsh
+        env:
+          EXPECTED_ARTIFACT_SHA256: 659589043fd670d438f93cc3f302eb50b41c7cb1cc972a5f428f0c580ac053ee
         run: |
           @'
           import json, os
@@ -105,7 +132,6 @@ jobs:
           from tools.metablooms.powershell_verification_spine.evidence_binding_v1 import validate_hosted_windows_evidence
 
           root = Path(os.environ['HOSTED_EVIDENCE_ROOT'])
-          artifact = Path(os.environ['PILOT001_ARTIFACT'])
           contract = Path(os.environ['PILOT001_CONTRACT'])
           contract_data = json.loads(contract.read_text(encoding='utf-8-sig'))
           subject = {
@@ -203,6 +229,7 @@ jobs:
           [ordered]@{
             schema = 'mb.powershell.hosted_evidence_manifest.v1'
             verifier_commit = $env:VERIFIER_COMMIT.ToLowerInvariant()
+            pinned_powershell_zip_sha256 = $env:PINNED_PWSH_ZIP_SHA256
             file_count = @($rows).Count
             files = @($rows)
           } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $env:HOSTED_EVIDENCE_ROOT 'HOSTED_EVIDENCE_MANIFEST.json') -Encoding utf8NoBOM
