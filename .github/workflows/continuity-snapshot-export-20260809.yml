@@ -1,0 +1,38 @@
+name: Continuity Snapshot Export 20260809
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export-continuity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout trigger repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Fetch exact continuity authority files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/blobertplunk-hue/Cross-Chat-Continuity.git "$RUNNER_TEMP/ccc"
+          mkdir -p "$RUNNER_TEMP/export/global" "$RUNNER_TEMP/export/workstreams/metablooms-os"
+          cp "$RUNNER_TEMP/ccc/global/LATEST.json" "$RUNNER_TEMP/export/global/LATEST.json"
+          cp "$RUNNER_TEMP/ccc/global/METABLOOMS_BOOTSTRAP_AUTHORITY_v1.json" "$RUNNER_TEMP/export/global/METABLOOMS_BOOTSTRAP_AUTHORITY_v1.json"
+          cp "$RUNNER_TEMP/ccc/workstreams/metablooms-os/LATEST.json" "$RUNNER_TEMP/export/workstreams/metablooms-os/LATEST.json"
+          cp "$RUNNER_TEMP/ccc/global/CHAT_SESSION_INDEX.json" "$RUNNER_TEMP/export/global/CHAT_SESSION_INDEX.json"
+          (cd "$RUNNER_TEMP/export" && sha256sum global/LATEST.json global/METABLOOMS_BOOTSTRAP_AUTHORITY_v1.json workstreams/metablooms-os/LATEST.json global/CHAT_SESSION_INDEX.json > SHA256SUMS.txt)
+
+      - name: Upload exact continuity snapshot inputs
+        uses: actions/upload-artifact@v4
+        with:
+          name: continuity-snapshot-inputs-20260809
+          path: ${{ runner.temp }}/export
+          if-no-files-found: error
+          retention-days: 1
