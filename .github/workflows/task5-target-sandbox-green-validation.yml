@@ -1,0 +1,123 @@
+name: Task 5 Target Sandbox Green Validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/task5-target-sandbox-green-validation.yml'
+      - 'task5_validation/TASK5_WINDOWS_VALIDATION_PAYLOAD.zip.b64'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-task5-control-plane:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Rehydrate validation payload
+        shell: pwsh
+        env:
+          EXPECTED_PAYLOAD_SHA256: 99514050d6c666e3b54958143c697b65863514528c443d4fc99e085d449dde48
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $b64 = Get-Content -LiteralPath task5_validation/TASK5_WINDOWS_VALIDATION_PAYLOAD.zip.b64 -Raw
+          $zip = Join-Path $env:RUNNER_TEMP 'task5-validation.zip'
+          [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($b64.Trim()))
+          $sha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -ne $env:EXPECTED_PAYLOAD_SHA256) { throw "validation payload hash mismatch: $sha" }
+          $root = Join-Path $env:RUNNER_TEMP 'task5-validation'
+          Expand-Archive -LiteralPath $zip -DestinationPath $root -Force
+          "TASK5_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run Task 5 Python acceptance suite
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          python -m pip install --disable-pip-version-check --quiet pytest==9.0.2
+          $env:METABLOOMS_OS_ROOT = $env:TASK5_ROOT
+          Push-Location $env:TASK5_ROOT
+          try {
+            python -m pytest -q `
+              tests/software_delivery/powershell_spine/test_target_sandbox_contract_v1.py `
+              tests/software_delivery/powershell_spine/test_target_sandbox_green_v1.py `
+              tests/software_delivery/powershell_spine/test_target_sandbox_windows_surfaces_v1.py
+            if ($LASTEXITCODE -ne 0) { throw "Task 5 acceptance suite failed rc=$LASTEXITCODE" }
+          }
+          finally { Pop-Location }
+
+      - name: Parse Task 5 PowerShell surfaces
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $files = @(
+            (Join-Path $env:TASK5_ROOT 'tools/metablooms/powershell_verification_spine/windows/target_host_probe.ps1'),
+            (Join-Path $env:TASK5_ROOT 'tools/metablooms/powershell_verification_spine/windows/target_sandbox_launcher.ps1'),
+            (Join-Path $env:TASK5_ROOT 'tools/metablooms/powershell_verification_spine/windows/sandbox_verifier.ps1')
+          )
+          foreach ($file in $files) {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
+            if (@($errors).Count -ne 0) { throw "pwsh parser errors in $file: $($errors | Out-String)" }
+          }
+          $sandboxVerifier = $files[2]
+          $escaped = $sandboxVerifier.Replace("'", "''")
+          powershell.exe -NoLogo -NoProfile -Command "$tokens = `$null; `$errors = `$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$escaped',[ref]`$tokens,[ref]`$errors); if (@(`$errors).Count -ne 0) { `$errors | ForEach-Object { Write-Error `$_.Message }; exit 2 }"
+          if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell 5.1 parser rejected sandbox_verifier.ps1 rc=$LASTEXITCODE" }
+
+      - name: Run metadata-only host probe
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:RUNNER_TEMP 'target_host_probe.json'
+          & (Join-Path $env:TASK5_ROOT 'tools/metablooms/powershell_verification_spine/windows/target_host_probe.ps1') -ProfileId 'gha-task5-control-plane' -OutputPath $out
+          if ($LASTEXITCODE -ne 0) { throw "target_host_probe.ps1 failed rc=$LASTEXITCODE" }
+          $probe = Get-Content -LiteralPath $out -Raw | ConvertFrom-Json
+          if ($probe.native_windows -ne $true) { throw 'host probe did not report native Windows' }
+          if ($probe.candidate_execution_observed -ne $false) { throw 'metadata-only host probe reported candidate execution' }
+          if (-not $probe.host_build -or -not $probe.architecture) { throw 'host probe omitted build or architecture' }
+          New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'task5-evidence') -Force | Out-Null
+          Copy-Item -LiteralPath $out -Destination (Join-Path $env:RUNNER_TEMP 'task5-evidence/target_host_probe.json')
+
+      - name: Write validation receipt
+        shell: pwsh
+        env:
+          VERIFIER_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'task5-evidence'
+          $probe = Get-Content -LiteralPath (Join-Path $root 'target_host_probe.json') -Raw | ConvertFrom-Json
+          [ordered]@{
+            schema = 'mb.powershell.task5_control_plane_windows_validation.v1'
+            decision = 'PASS'
+            verifier_commit = $env:VERIFIER_COMMIT.ToLowerInvariant()
+            payload_sha256 = '99514050d6c666e3b54958143c697b65863514528c443d4fc99e085d449dde48'
+            runner_os = $env:RUNNER_OS
+            host_build = [string]$probe.host_build
+            host_ubr = [string]$probe.host_ubr
+            architecture = [string]$probe.architecture
+            sandbox_available = [bool]$probe.windows_sandbox.available
+            wsb_cli_available = [bool]$probe.windows_sandbox.wsb_cli_available
+            candidate_execution_observed = [bool]$probe.candidate_execution_observed
+          } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $root 'TASK5_WINDOWS_VALIDATION_RECEIPT.json') -Encoding utf8NoBOM
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task5-target-sandbox-green-validation
+          path: ${{ runner.temp }}/task5-evidence
+          if-no-files-found: warn
+          retention-days: 14
