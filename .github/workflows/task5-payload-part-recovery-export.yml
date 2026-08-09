@@ -1,0 +1,27 @@
+name: Task 5 Payload Part Recovery Export
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  export-task5-payload-part:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact PR head
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Upload preserved Task 5 payload part
+        uses: actions/upload-artifact@v4
+        with:
+          name: task5-payload-part-recovery
+          path: task5_validation/payload.part00
+          if-no-files-found: error
+          retention-days: 1
