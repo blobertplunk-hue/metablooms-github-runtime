@@ -1,4 +1,3 @@
-# Trigger: PR synchronize for isolated Windows CI probe; no test-logic change.
 name: Student Data Hub PdfPig Windows Probe
 
 on:
@@ -17,6 +16,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   pdfpig-windows-probe:
@@ -111,9 +111,30 @@ jobs:
           $obj | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $root 'PROVENANCE.json') -Encoding UTF8
 
       - name: Upload exact probe artifact
+        id: upload
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: lakeland-pdfpig-windows-probe
           path: ci/student-data-hub-pdf/artifact
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
+
+      - name: Publish machine-readable probe locator to draft PR
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: |
+          $body = @"
+          STUDENT_DATA_HUB_PDFPIG_PROBE
+          run_id=${{ github.run_id }}
+          run_attempt=${{ github.run_attempt }}
+          artifact_id=$env:ARTIFACT_ID
+          head_sha=${{ github.sha }}
+          ref=${{ github.ref }}
+          job_status=${{ job.status }}
+          "@
+          $body | Set-Content -LiteralPath "$env:RUNNER_TEMP\probe-comment.txt" -Encoding UTF8
+          gh pr comment 3 --repo "${{ github.repository }}" --body-file "$env:RUNNER_TEMP\probe-comment.txt"
