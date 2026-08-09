@@ -1,0 +1,125 @@
+name: Student Data Hub rc5 Wrapper v2
+
+on:
+  push:
+    branches:
+      - student-data-hub-pdf-ci-20260808
+    paths:
+      - ".github/workflows/student-data-hub-rc5-wrapper-v2.yml"
+      - "ci/student-data-hub-rc5-cmd/RUN_LAKELAND_RC5_ALL_v2.cmd"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  wrapper-v2:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install exact PowerShell 7.6.3
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip=Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.3-win-x64.zip'
+          $fakeProgramFiles=Join-Path $env:RUNNER_TEMP 'ProgramFilesShim'
+          $dir=Join-Path $fakeProgramFiles 'PowerShell\7'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.3/PowerShell-7.6.3-win-x64.zip' -OutFile $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath $dir -Force
+          $pwsh=Join-Path $dir 'pwsh.exe'
+          $version=& $pwsh -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          if($version.Trim() -ne '7.6.3'){throw "Unexpected PowerShell version: $version"}
+          "FAKE_PROGRAMFILES=$fakeProgramFiles" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "PWSH763=$pwsh" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify exact runner bytes and embedded PowerShell syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $runner=Join-Path $env:GITHUB_WORKSPACE 'ci\student-data-hub-rc5-cmd\RUN_LAKELAND_RC5_ALL_v2.cmd'
+          $expected='5d41fd5e6d1c06e1425be9225d7967d6bd6a4217ae93ead09fb616a2c4d0b8a7'
+          $actual=(Get-FileHash -LiteralPath $runner -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -ne $expected){throw "Runner SHA mismatch expected=$expected actual=$actual"}
+          $text=Get-Content -Raw -LiteralPath $runner
+          $commands=[regex]::Matches($text,'(?m)^"%PWSH%" .*? -Command "(.+)"\r?$')
+          if($commands.Count -ne 6){throw "Expected 6 embedded -Command blocks, got $($commands.Count)"}
+          foreach($m in $commands){$tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseInput($m.Groups[1].Value,[ref]$tokens,[ref]$errors);if($errors.Count){throw ('Embedded PowerShell parse error: '+($errors.Message -join '; '))}}
+          Write-Host "PASS exact runner SHA and $($commands.Count) embedded PowerShell blocks"
+
+      - name: Receipt-bound collector race and tamper tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $runner=Join-Path $env:GITHUB_WORKSPACE 'ci\student-data-hub-rc5-cmd\RUN_LAKELAND_RC5_ALL_v2.cmd'
+          $text=Get-Content -Raw -LiteralPath $runner
+          $m=[regex]::Match($text,'(?m)^set "COLLECTOR_B64=([A-Za-z0-9+/=]+)"\r?$')
+          $s=[regex]::Match($text,'(?m)^set "COLLECTOR_SHA256=([0-9a-f]{64})"\r?$')
+          if(-not $m.Success -or -not $s.Success){throw 'Embedded collector metadata missing.'}
+          $raw=[Convert]::FromBase64String($m.Groups[1].Value)
+          $ms=[IO.MemoryStream]::new([byte[]]$raw);$gz=[IO.Compression.GzipStream]::new($ms,[IO.Compression.CompressionMode]::Decompress);$sr=[IO.StreamReader]::new($gz,[Text.Encoding]::UTF8);$collector=$sr.ReadToEnd();$sr.Dispose();$gz.Dispose();$ms.Dispose()
+          $actual=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($collector))).ToLowerInvariant()
+          if($actual -ne $s.Groups[1].Value){throw 'Embedded collector SHA mismatch.'}
+          $tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseInput($collector,[ref]$tokens,[ref]$errors);if($errors.Count){throw ($errors.Message -join '; ')}
+          . ([scriptblock]::Create($collector))
+          $root=Join-Path $env:RUNNER_TEMP ('collector-race-'+[guid]::NewGuid().ToString('N'))
+          $selfRoot=Join-Path $root 'Self Test';$logsRoot=Join-Path $selfRoot 'Logs';$result=Join-Path $root 'result';$exact=Join-Path $logsRoot '20260808_224534\Core.Tests';$newer=Join-Path $logsRoot '20260808_231344\Core.Tests'
+          New-Item -ItemType Directory -Force -Path $exact,$newer,$result | Out-Null
+          $stdout=Join-Path $exact 'stdout.log';$stderr=Join-Path $exact 'stderr.log';Set-Content $stdout 'exact-run-output' -Encoding utf8NoBOM;Set-Content $stderr '' -NoNewline -Encoding utf8NoBOM;Set-Content (Join-Path $newer 'stdout.log') 'WRONG-NEWER-RUN' -Encoding utf8NoBOM
+          (Get-Item (Split-Path $newer -Parent)).LastWriteTimeUtc=[DateTime]::UtcNow.AddMinutes(5)
+          $receipt=[ordered]@{status='PASS';portable_suites_total=1;portable_suites_passed=1;suite_results=@([ordered]@{name='Core.Tests.ps1';started_at_utc=[DateTime]::UtcNow.AddSeconds(1).ToString('o');stdout_log=$stdout;stdout_sha256=(Get-FileHash $stdout -Algorithm SHA256).Hash.ToLowerInvariant();stderr_log=$stderr;stderr_sha256=(Get-FileHash $stderr -Algorithm SHA256).Hash.ToLowerInvariant();assertion_telemetry_path='';assertion_telemetry_sha256=''})}
+          $receiptPath=Join-Path $selfRoot 'SELF_TEST_RECEIPT.json';New-Item -ItemType Directory -Force -Path $selfRoot | Out-Null;$receipt|ConvertTo-Json -Depth 8|Set-Content $receiptPath -Encoding utf8NoBOM
+          $marker=Join-Path $root 'marker';[DateTime]::UtcNow.ToString('o')|Set-Content $marker -Encoding ascii
+          $r=Collect-ExactSelfTestEvidence -ReceiptPath $receiptPath -LogsRoot $logsRoot -ResultDir $result -ExpectedTestExitCode 0 -RunMarkerPath $marker
+          if($r.source_run_id -ne '20260808_224534'){throw 'Collector selected wrong run id.'}
+          $copied=Get-Content -Raw (Join-Path $result 'SUITE_LOGS\Core.Tests\stdout.log');if($copied -notmatch 'exact-run-output' -or $copied -match 'WRONG-NEWER-RUN'){throw 'Collector copied unrelated newer run.'}
+          Set-Content $stdout 'tampered-after-receipt' -Encoding utf8NoBOM
+          $tamperResult=Join-Path $root 'tamper-result';New-Item -ItemType Directory -Force -Path $tamperResult|Out-Null
+          $blocked=$false;try{Collect-ExactSelfTestEvidence -ReceiptPath $receiptPath -LogsRoot $logsRoot -ResultDir $tamperResult -ExpectedTestExitCode 0 -RunMarkerPath $marker | Out-Null}catch{$blocked=$true}
+          if(-not $blocked){throw 'Tampered log was not rejected.'}
+          Write-Host 'PASS receipt-bound race and tampered-log rejection'
+
+      - name: Native cmd.exe guard paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:GITHUB_WORKSPACE 'ci\student-data-hub-rc5-cmd';$runner=Join-Path $dir 'RUN_LAKELAND_RC5_ALL_v2.cmd';$payload=Join-Path $dir 'Lakeland_Offline_Student_Data_Hub_v4.0.0-rc5-instrumented.zip';$harness=Join-Path $env:RUNNER_TEMP 'invoke-wrapper-v2.cmd'
+          function Invoke-Runner { param([bool]$WithBadPayload); Remove-Item $payload -Force -ErrorAction SilentlyContinue;if($WithBadPayload){[IO.File]::WriteAllBytes($payload,[byte[]](1,2,3,4,5,6,7,8))};"@echo off`r`nset `"ProgramFiles=$env:FAKE_PROGRAMFILES`"`r`ncall `"$runner`" <nul`r`nexit /b %errorlevel%`r`n"|Set-Content $harness -Encoding ascii -NoNewline;$out=& cmd.exe /d /s /c $harness 2>&1|Out-String;$rc=$LASTEXITCODE;Remove-Item $payload -Force -ErrorAction SilentlyContinue;[pscustomobject]@{rc=$rc;out=$out} }
+          $missing=Invoke-Runner $false;if($missing.rc -ne 1 -or $missing.out -notmatch 'Payload ZIP is not beside this CMD file'){throw 'Missing-payload native guard failed.'}
+          $bad=Invoke-Runner $true;if($bad.rc -ne 1 -or $bad.out -notmatch 'Payload SHA-256 mismatch' -or $bad.out -match 'Running the instrumented recipient self-test'){throw 'Bad-hash native guard failed.'}
+          Write-Host 'PASS native cmd.exe missing-payload and bad-hash guards'
+          exit 0
+
+      - name: Write evidence
+        shell: pwsh
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'wrapper-v2-evidence';New-Item -ItemType Directory -Force -Path $out|Out-Null
+          $runner=Join-Path $env:GITHUB_WORKSPACE 'ci\student-data-hub-rc5-cmd\RUN_LAKELAND_RC5_ALL_v2.cmd'
+          [ordered]@{schema='mb.lakeland.rc5.wrapper_v2.windows_ci.v1';created_at_utc=[DateTime]::UtcNow.ToString('o');decision='PASS';runner_sha256=(Get-FileHash $runner -Algorithm SHA256).Hash.ToLowerInvariant();powershell='7.6.3';runner_os=$env:RUNNER_OS;image_os=$env:ImageOS;checks=@('exact_runner_sha','six_embedded_ps_parse','collector_sha','collector_parse','receipt_bound_race','tampered_log_rejected','native_missing_payload','native_bad_hash')}|ConvertTo-Json -Depth 6|Set-Content (Join-Path $out 'WINDOWS_WRAPPER_V2_RESULT.json') -Encoding utf8NoBOM
+
+      - name: Upload evidence
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: lakeland-rc5-wrapper-v2-windows-evidence
+          path: ${{ runner.temp }}/wrapper-v2-evidence
+          retention-days: 7
+
+      - name: Publish locator
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: |
+          $body=@"
+          STUDENT_DATA_HUB_RC5_WRAPPER_V2
+          run_id=${{ github.run_id }}
+          artifact_id=$env:ARTIFACT_ID
+          head_sha=${{ github.sha }}
+          job_status=${{ job.status }}
+          "@
+          gh pr comment 3 --repo "${{ github.repository }}" --body $body
