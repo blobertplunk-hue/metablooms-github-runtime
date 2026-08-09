@@ -1,0 +1,126 @@
+name: Student Data Hub rc5 Native CMD Probe
+
+on:
+  push:
+    branches:
+      - student-data-hub-pdf-ci-20260808
+    paths:
+      - ".github/workflows/student-data-hub-rc5-cmd-native.yml"
+      - "ci/student-data-hub-rc5-cmd/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  native-cmd-probe:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install exact PowerShell 7.6.3 in isolated ProgramFiles shim
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip=Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.3-win-x64.zip'
+          $fakeProgramFiles=Join-Path $env:RUNNER_TEMP 'ProgramFilesShim'
+          $dir=Join-Path $fakeProgramFiles 'PowerShell\7'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.3/PowerShell-7.6.3-win-x64.zip' -OutFile $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath $dir -Force
+          $version=& (Join-Path $dir 'pwsh.exe') -NoLogo -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+          if($version.Trim() -ne '7.6.3'){throw "Unexpected portable PowerShell version: $version"}
+          "FAKE_PROGRAMFILES=$fakeProgramFiles" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify exact CMD bytes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $cmd=Join-Path $env:GITHUB_WORKSPACE 'ci\student-data-hub-rc5-cmd\RUN_LAKELAND_RC5_ALL.cmd'
+          $expected='3f335f334f411fe93893e19cd68b3c281b3697247f4705afb1bd98f150d4396b'
+          $actual=(Get-FileHash -LiteralPath $cmd -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($actual -ne $expected){throw "CMD SHA mismatch expected=$expected actual=$actual"}
+          Write-Host "PASS exact CMD SHA-256 $actual"
+
+      - name: Native cmd.exe missing-payload failure path
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $cmd=Join-Path $env:GITHUB_WORKSPACE 'ci\student-data-hub-rc5-cmd\RUN_LAKELAND_RC5_ALL.cmd'
+          $harness=Join-Path $env:RUNNER_TEMP 'invoke-exact-runner.cmd'
+          "@echo off`r`nset `"ProgramFiles=$env:FAKE_PROGRAMFILES`"`r`ncall `"$cmd`" <nul`r`nexit /b %errorlevel%`r`n" | Set-Content -LiteralPath $harness -Encoding ascii -NoNewline
+          $out = & cmd.exe /d /s /c $harness 2>&1 | Out-String
+          $rc=$LASTEXITCODE
+          $out | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'MISSING_PAYLOAD_CONSOLE.txt') -Encoding utf8
+          if($rc -ne 1){throw "Expected missing-payload exit 1, got $rc"}
+          if($out -notmatch 'Payload ZIP is not beside this CMD file'){throw 'Expected missing-payload diagnostic not observed.'}
+          Write-Host 'PASS native CMD missing-payload path'
+          exit 0
+
+      - name: Native cmd.exe payload-hash rejection path
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $dir=Join-Path $env:GITHUB_WORKSPACE 'ci\student-data-hub-rc5-cmd'
+          $cmd=Join-Path $dir 'RUN_LAKELAND_RC5_ALL.cmd'
+          $payload=Join-Path $dir 'Lakeland_Offline_Student_Data_Hub_v4.0.0-rc5-instrumented.zip'
+          [IO.File]::WriteAllBytes($payload,[byte[]](1,2,3,4,5,6,7,8))
+          $harness=Join-Path $env:RUNNER_TEMP 'invoke-exact-runner.cmd'
+          "@echo off`r`nset `"ProgramFiles=$env:FAKE_PROGRAMFILES`"`r`ncall `"$cmd`" <nul`r`nexit /b %errorlevel%`r`n" | Set-Content -LiteralPath $harness -Encoding ascii -NoNewline
+          try {
+            $out = & cmd.exe /d /s /c $harness 2>&1 | Out-String
+            $rc=$LASTEXITCODE
+          } finally { Remove-Item -LiteralPath $payload -Force -ErrorAction SilentlyContinue }
+          $out | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'HASH_REJECTION_CONSOLE.txt') -Encoding utf8
+          if($rc -ne 1){throw "Expected hash-rejection exit 1, got $rc"}
+          if($out -notmatch 'Payload SHA-256 mismatch'){throw 'Expected payload SHA mismatch diagnostic not observed.'}
+          if($out -match 'Running the instrumented recipient self-test'){throw 'Runner proceeded past hash gate unexpectedly.'}
+          Write-Host 'PASS native CMD hash-rejection path'
+          exit 0
+
+      - name: Write native CMD probe result
+        shell: pwsh
+        run: |
+          $out=Join-Path $env:RUNNER_TEMP 'cmd-probe-artifact'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'MISSING_PAYLOAD_CONSOLE.txt') -Destination $out
+          Copy-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'HASH_REJECTION_CONSOLE.txt') -Destination $out
+          $cmd=Join-Path $env:GITHUB_WORKSPACE 'ci\student-data-hub-rc5-cmd\RUN_LAKELAND_RC5_ALL.cmd'
+          [ordered]@{
+            schema='mb.lakeland.rc5.native_cmd_probe.v1'
+            created_at_utc=[DateTime]::UtcNow.ToString('o')
+            cmd_sha256=(Get-FileHash -LiteralPath $cmd -Algorithm SHA256).Hash.ToLowerInvariant()
+            powershell_version='7.6.3'
+            runner_os=$env:RUNNER_OS
+            image_os=$env:ImageOS
+            checks=@('exact_cmd_sha','missing_payload_exit_1','missing_payload_diagnostic','hash_mismatch_exit_1','hash_mismatch_diagnostic','selftest_not_reached_on_hash_mismatch')
+            decision='PASS'
+          } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $out 'NATIVE_CMD_PROBE_RESULT.json') -Encoding utf8
+
+      - name: Upload native CMD probe artifact
+        id: upload
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lakeland-rc5-native-cmd-probe
+          path: ${{ runner.temp }}/cmd-probe-artifact
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Publish native CMD probe locator
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+        run: |
+          $body=@"
+          STUDENT_DATA_HUB_RC5_NATIVE_CMD
+          run_id=${{ github.run_id }}
+          artifact_id=$env:ARTIFACT_ID
+          head_sha=${{ github.sha }}
+          job_status=${{ job.status }}
+          "@
+          gh pr comment 3 --repo "${{ github.repository }}" --body $body
