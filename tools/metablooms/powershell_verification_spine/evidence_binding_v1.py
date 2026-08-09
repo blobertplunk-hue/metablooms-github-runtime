@@ -74,9 +74,6 @@ def _matrix_leg_spec(raw: str) -> dict[str, str] | None:
             "powershell_edition": "Core",
             "powershell_version": version,
         }
-    # Task-1 contracts historically allowed a bare version such as "7.6.3".
-    # Preserve that representation as PowerShell Core rather than silently
-    # broadening the claim to Windows PowerShell.
     if all(part.isdigit() for part in text.split(".")):
         return {
             "declared_matrix_leg": text,
@@ -91,8 +88,6 @@ def _version_matches(expected: str, observed: Any) -> bool:
     if not isinstance(observed, str) or not observed.strip():
         return False
     observed_text = observed.strip()
-    # "Windows PowerShell 5.1" represents the 5.1 family whose patch/build
-    # components vary by Windows build. Core matrix legs are exact by default.
     if expected == "5.1":
         return observed_text == "5.1" or observed_text.startswith("5.1.")
     return observed_text == expected
@@ -112,14 +107,7 @@ def _runtime_matches(spec: dict[str, str], execution: dict[str, Any]) -> bool:
 
 
 def validate_hosted_windows_evidence(subject: dict, hosted_receipt: dict) -> dict[str, Any]:
-    """Validate H2 hosted-Windows execution evidence for one frozen subject.
-
-    This is a fail-closed *evidence validator*. It does not execute candidate
-    code. The hosted driver is responsible for producing the receipt from a
-    native Windows runner; this function proves that the receipt binds to the
-    H0 subject, covers every declared PowerShell matrix leg, and executes only
-    exact declared user entrypoints with the expected runtime family/version.
-    """
+    """Validate H2 hosted-Windows execution evidence for one frozen subject."""
     failure_classes: list[str] = []
     missing_matrix_legs: list[str] = []
 
@@ -128,8 +116,6 @@ def validate_hosted_windows_evidence(subject: dict, hosted_receipt: dict) -> dic
     if not isinstance(hosted_receipt, dict):
         return {"decision": "GATE_INCOMPLETE", "failure_classes": ["HOSTED_RECEIPT_REQUIRED"]}
 
-    # Bind the hosted evidence to the complete H0 identity, including contract
-    # hash in addition to Task-1's artifact+generation dynamic binding floor.
     for field, failure in (
         ("artifact_sha256", "HOSTED_ARTIFACT_SHA256_MISMATCH"),
         ("contract_sha256", "HOSTED_CONTRACT_SHA256_MISMATCH"),
@@ -172,7 +158,7 @@ def validate_hosted_windows_evidence(subject: dict, hosted_receipt: dict) -> dic
         and str(environment.get("os_family", "")).lower() == "windows"
         and environment.get("native_windows") is True
         and isinstance(environment.get("host_os"), str)
-        and environment.get("host_os", "").lower().startswith("windows")
+        and "windows" in environment.get("host_os", "").lower()
     )
     if not is_native_windows:
         failure_classes.append("NATIVE_WINDOWS_EVIDENCE_REQUIRED")
@@ -229,15 +215,10 @@ def validate_hosted_windows_evidence(subject: dict, hosted_receipt: dict) -> dic
             None,
         )
         if matching_spec is None:
-            # An execution under a runtime outside the declared matrix is a
-            # concrete wrong-runtime defect, not merely missing evidence.
             severe_execution_failure = True
             failure_classes.append("WRONG_POWERSHELL_RUNTIME_SELECTED")
             continue
 
-        # A non-Windows receipt is supplemental only. Its POSIX runtime path
-        # cannot be judged against Windows executable naming, and the native
-        # provenance failure already prevents it from satisfying H2.
         if is_native_windows and not _runtime_matches(matching_spec, execution):
             severe_execution_failure = True
             failure_classes.append("WRONG_POWERSHELL_RUNTIME_SELECTED")
@@ -260,7 +241,6 @@ def validate_hosted_windows_evidence(subject: dict, hosted_receipt: dict) -> dic
     if missing_matrix_legs:
         failure_classes.append("DECLARED_POWERSHELL_MATRIX_LEG_UNEXECUTED")
 
-    # Deterministic de-duplication preserves first-cause ordering.
     failure_classes = list(dict.fromkeys(failure_classes))
     result: dict[str, Any] = {
         "decision": "PASS",
