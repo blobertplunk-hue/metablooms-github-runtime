@@ -1,0 +1,16 @@
+{
+  "schema": "metachat.build.v1",
+  "version": "0.7.0",
+  "build_id": "sha256:0b96946680bd6c00438b27a33df0eded4af9c16d900d5ef56e44ec9128323a8d",
+  "expected_extension_id": "dkjgeplcldbicjciacambbemephklbfc",
+  "source_digest": "sha256:0b96946680bd6c00438b27a33df0eded4af9c16d900d5ef56e44ec9128323a8d",
+  "package_lock_digest": "sha256:10f5fa3ec645db2a972576b2a9d4866b2c825bc484fb1b3788b6f009a73febf0",
+  "node_version": "v22.16.0",
+  "npm_version": "10.9.2",
+  "typescript_version": "Version 5.8.3",
+  "chrome_for_testing": {
+    "version": "152.0.7977.82",
+    "platform": "linux64",
+    "status": "REQUIRED_BEFORE_MANUAL_CANARY"
+  }
+}

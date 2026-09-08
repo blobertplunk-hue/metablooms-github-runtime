@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "MetaChat Sidecar Canary",
+  "version": "0.7.0",
+  "description": "Immutable v0.7.0 diagnostic and explicit draft placement canary.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAub4RLWDZu5UstubPSIr3VmP2xQovuwyLABPyKZOZrrznTHKNIklnRP9B4fxeIgheP86AjjUKt5hpC5jg1hldO7Uyiz5ajLdCC2LDrd73Dym8qx/xRsabuzPXJQ99T2JpbNH95A2+2X0PUUM8JlGNieX8zikw3f2f/bP+n3yazqtfIRWFVX5bUvIs1VapNVhFLZMVTL/Bf26AwGwzpAXf9lKFmHRzQ4hQMr2RfTl5B0tQfGop6WOCkFCJm8Yop4H2raEocLe5Mb4NqPUQjy+H81rz9ixun+LG9/ygU2CvbYiuJBxPvqNVBEL9wLVFMaAw2bN4y5U0iLXNQUhID41EwQIDAQAB",
+  "permissions": ["storage", "sidePanel", "nativeMessaging"],
+  "host_permissions": ["https://chatgpt.com/*"],
+  "background": {"service_worker": "dist/service-worker.js"},
+  "side_panel": {"default_path": "dist/sidepanel.html"},
+  "action": {"default_title": "MetaChat v0.7.0"},
+  "content_scripts": [{
+    "matches": ["https://chatgpt.com/*"],
+    "js": ["dist/content-script.js"],
+    "run_at": "document_idle",
+    "world": "ISOLATED"
+  }]
+}
