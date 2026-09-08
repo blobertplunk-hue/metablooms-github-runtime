@@ -1,0 +1,59 @@
+name: MetaChat v0.7.0 exact CFT E2E
+
+on:
+  push:
+    branches:
+      - metachat-v070-cft-e2e-20260908
+
+permissions:
+  contents: read
+
+jobs:
+  exact-cft-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout isolated harness branch
+        uses: actions/checkout@v4
+
+      - name: Setup exact Node used by build provenance
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.16.0'
+
+      - name: Verify harness bundle hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'f2a04e85bdd5053d5edb100e1ec94a9a3ff7e15d8d6e9a0f79b4d849e730a45a  METACHAT_V070_CFT_E2E_GHA_BUNDLE.zip' | sha256sum -c -
+
+      - name: Extract exact v0.7.0 release and E2E harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf e2e
+          mkdir e2e
+          unzip -q METACHAT_V070_CFT_E2E_GHA_BUNDLE.zip -d e2e
+          test -f e2e/release/v0.7.0/EXTENSION/manifest.json
+          test -f e2e/tests/browser-e2e/run.mjs
+          test -f e2e/tools/get-cft.mjs
+
+      - name: Download and execute exact Chrome for Testing 152.0.7977.82
+        shell: bash
+        working-directory: e2e
+        run: |
+          set -euo pipefail
+          node tests/browser-e2e/run.mjs
+          test -f acceptance/v0.7.0/CFT_E2E_RECEIPT.json
+          node -e "const r=require('./acceptance/v0.7.0/CFT_E2E_RECEIPT.json'); if(r.status!=='PASS') process.exit(1); if(r.chrome_for_testing!=='152.0.7977.82') process.exit(2); console.log('CFT_E2E_RECEIPT_STATUS='+r.status); console.log('CFT_VERSION='+r.chrome_for_testing); console.log('BUILD_ID='+r.build_id);"
+          cat acceptance/v0.7.0/CFT_E2E_RECEIPT.json
+
+      - name: Upload exact acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metachat-v070-cft-e2e-receipt
+          path: |
+            e2e/acceptance/v0.7.0/CFT_E2E_RECEIPT.json
+          if-no-files-found: error
+          retention-days: 7
