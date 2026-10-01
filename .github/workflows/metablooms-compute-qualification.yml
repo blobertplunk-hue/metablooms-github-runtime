@@ -1,0 +1,31 @@
+name: MetaBlooms deterministic cold-runtime qualification
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/metablooms-compute-qualification.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Execute deterministic fixture
+        shell: python
+        run: |
+          import hashlib, json, pathlib, platform
+          obj={"schema":"mb.compute.fixture.v1","items":[{"id":"beta","value":2},{"id":"alpha","value":1}],"required":["alpha","beta"],"note":"synthetic non-sensitive fixture"}
+          canon=json.dumps(obj,sort_keys=True,separators=(",",":"))+"\n"
+          digest=hashlib.sha256(canon.encode()).hexdigest()
+          expected="8cdd6d2b7c5aee0ea44aa9083c4801251287b006d17811fee347c727f98a70e6"
+          receipt={"schema":"mb.compute.github_actions.v1","canonical_sha256":digest,"expected_sha256":expected,"match":digest==expected,"sorted_ids":sorted(x["id"] for x in obj["items"]),"runtime":"github-actions/ubuntu-latest","python":platform.python_version()}
+          pathlib.Path("metablooms-github-actions-receipt.json").write_text(json.dumps(receipt,sort_keys=True,indent=2)+"\n",encoding="utf-8")
+          print("MB_COMPUTE_QUALIFICATION="+json.dumps(receipt,sort_keys=True,separators=(",",":")))
+          if digest != expected:
+              raise SystemExit("deterministic fixture hash mismatch")
+      - name: Upload qualification receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: metablooms-github-actions-receipt
+          path: metablooms-github-actions-receipt.json
+          if-no-files-found: error
